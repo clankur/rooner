@@ -96,6 +96,10 @@ The agent can call `wikiSearch(query)` to search Markdown in the local rs-sdk
 `wiki/` and `learnings/` directories. Each response contains up to three excerpts
 (at most 1,200 characters each), with source paths and the remaining lookup budget.
 Search runs locally with no network requests or additional dependencies.
+Exact page titles and filenames take priority over general BM25 matches. Excerpts
+preserve section headings, table headers, and complete rows. Up to two excerpts
+can come from one source when the second covers additional query terms; overlapping
+body lines are omitted, while headers may repeat so each excerpt is readable.
 
 Episodes default to **three lookups in addition to the game-action budget**.
 Lookups never execute through the game bridge, count as valid/invalid game actions,
