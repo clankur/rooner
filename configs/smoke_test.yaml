@@ -5,7 +5,7 @@ defaults:
   - _self_
 
 model:
-  model_name_or_path: "Qwen/Qwen3.5-0.8B"
+  model_name_or_path: "sshleifer/tiny-gpt2"
   quantize_int4: false
   max_new_tokens: 32
   temperature: 1.0
@@ -19,5 +19,5 @@ grpo:
   update_epochs: 1
 
 env:
-  max_actions: 2
+  max_actions: 10
   use_heuristic_reward: true
