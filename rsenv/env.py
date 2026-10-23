@@ -22,7 +22,8 @@ if TYPE_CHECKING:
 
 from rsenv.client import RSClient
 from rsenv.state import ALL_SKILLS, XP_FOR_LEVEL, GameState, Trajectory, xp_to_level
-from rsenv.tools import TOOL_SCHEMAS, parse_tool_calls
+from rsenv.tools import TOOL_SCHEMAS, WikiSearch, parse_tool_calls
+from rsenv.wiki import get_wiki_index
 
 logger = logging.getLogger(__name__)
 
@@ -134,14 +135,17 @@ def format_state(state: GameState) -> str:
     return tostring(root, encoding="unicode")
 
 
-def build_messages(state: GameState) -> list[dict]:
-    system_msg = {"role": "system", "content": load_system_prompt()}
+def build_messages(state: GameState, max_lookups: int = 3) -> list[dict]:
+    system_msg = {
+        "role": "system",
+        "content": load_system_prompt() + f"\n\nWiki lookup budget for this episode: {max_lookups}.",
+    }
     state_text = format_state(state)
 
     return [system_msg, {"role": "user", "content": state_text}]
 
 
-def append_tool_call(messages: list[dict], name: str, args: BaseModel, think_text: str = "") -> None:
+def append_tool_calls(messages: list[dict], calls: list[tuple[str, BaseModel]], think_text: str = "") -> None:
     content = f"<think>\n{think_text}\n</think>\n\n" if think_text else ""
     messages.append(
         {
@@ -149,6 +153,7 @@ def append_tool_call(messages: list[dict], name: str, args: BaseModel, think_tex
             "content": content,
             "tool_calls": [
                 {"type": "function", "function": {"name": name, "arguments": args.model_dump(exclude_none=True)}}
+                for name, args in calls
             ],
         }
     )
@@ -271,8 +276,7 @@ def compute_reward(
 
     # 2. Level-up bonus
     num_level_ups = sum(
-        max(0, xp_to_level(final_skills[s]) - xp_to_level(initial_skills.get(s, 0)))
-        for s in final_skills
+        max(0, xp_to_level(final_skills[s]) - xp_to_level(initial_skills.get(s, 0))) for s in final_skills
     )
     reward += 2.0 * num_level_ups
 
@@ -310,12 +314,17 @@ def rollout_trajectory(
     client: RSClient | None = None,
     model_lock: threading.Lock | None = None,
     xp_multiplier: int = 1,
+    max_lookups: int = 3,
+    wiki_data_path: str = "",
 ) -> Trajectory:
     """Roll out a plan-then-execute trajectory.
 
     If client is provided, actions execute through it (sim or live).
     If client is None, a temporary SimClient is created from initial_state.
+    Wiki calls are handled locally and have a separate, bounded lookup budget.
     """
+    if max_actions < 0 or max_lookups < 0:
+        raise ValueError("Action and lookup budgets must be nonnegative")
     if client is not None:
         state = client.reset(initial_state)
     else:
@@ -328,11 +337,12 @@ def rollout_trajectory(
     initial_xp = state.total_xp()
     initial_skills = dict(state.skills)
     initial_position = state.world_position
-    messages = build_messages(state)
+    messages = build_messages(state, max_lookups)
+    tool_schemas = [schema for schema in TOOL_SCHEMAS if max_lookups > 0 or schema["function"]["name"] != "wikiSearch"]
 
     inputs = processor.apply_chat_template(
         messages,
-        tools=TOOL_SCHEMAS,
+        tools=tool_schemas,
         tokenize=True,
         add_generation_prompt=True,
         enable_thinking=True,
@@ -353,6 +363,7 @@ def rollout_trajectory(
 
     num_actions = 0
     num_valid = 0
+    num_lookups = 0
     total_gen_tokens = 0
     action_xp_history: list[tuple[str, dict[str, float]]] = []
     _logged_first = False
@@ -368,7 +379,11 @@ def rollout_trajectory(
     }
 
     model.eval()
-    for _action_idx in range(max_actions):
+    # One recovery turn lets the model act after an over-budget lookup. The cap
+    # also prevents repeated rejected lookups from creating an infinite episode.
+    for _turn_idx in range(max_actions + max_lookups + 1):
+        if num_actions >= max_actions:
+            break
         input_ids = torch.tensor([all_token_ids], device=device)
 
         if model_lock is not None:
@@ -406,27 +421,46 @@ def rollout_trajectory(
         if think_start != -1 and think_end != -1:
             think_text = new_text[think_start + len("<think>") : think_end].strip()
 
+        executed_calls: list[tuple[str, BaseModel]] = []
+        observations: list[str] = []
         for action_name, action_args in calls:
             if num_actions >= max_actions:
                 break
-            num_actions += 1
-            result = client.execute_action(action_name, action_args)
-            state = client.get_state()
+            executed_calls.append((action_name, action_args))
+            if action_name == "wikiSearch":
+                if num_lookups >= max_lookups:
+                    observation = "Wiki lookup budget exhausted (0 remaining). Continue with game actions."
+                else:
+                    assert isinstance(action_args, WikiSearch)
+                    num_lookups += 1
+                    observation = get_wiki_index(wiki_data_path).search(action_args.query)
+                    observation += f"\nWiki lookups remaining: {max_lookups - num_lookups}."
+            else:
+                num_actions += 1
+                result = client.execute_action(action_name, action_args)
+                state = client.get_state()
+                if result.valid:
+                    num_valid += 1
+                action_xp_history.append((action_name, result.xp_gained))
+                observation = result.observation
+            observations.append(observation)
 
-            if result.valid:
-                num_valid += 1
-            action_xp_history.append((action_name, result.xp_gained))
-
-            append_tool_call(messages, action_name, action_args, think_text)
-            append_tool_response(messages, result.observation)
-            think_text = ""
-
-        if num_actions >= max_actions:
-            break
+        append_tool_calls(messages, executed_calls, think_text)
+        assistant_inputs = processor.apply_chat_template(
+            messages,
+            tools=tool_schemas,
+            tokenize=True,
+            add_generation_prompt=False,
+            enable_thinking=True,
+            return_dict=True,
+            return_tensors="pt",
+        )
+        for observation in observations:
+            append_tool_response(messages, observation)
 
         full_inputs = processor.apply_chat_template(
             messages,
-            tools=TOOL_SCHEMAS,
+            tools=tool_schemas,
             tokenize=True,
             add_generation_prompt=True,
             enable_thinking=True,
@@ -434,7 +468,10 @@ def rollout_trajectory(
             return_tensors="pt",
         )
         full_ids = full_inputs["input_ids"][0]
-        env_ids = full_ids[len(all_token_ids) :]
+        # Template serialization can differ from sampled tool-call text. Slice
+        # relative to the rendered assistant turn so no tool result is lost or
+        # accidentally marked as model-generated (including batched calls).
+        env_ids = full_ids[assistant_inputs["input_ids"].shape[1] :]
 
         all_token_ids.extend(env_ids.tolist())
         gen_mask.extend([0] * len(env_ids))
@@ -463,6 +500,7 @@ def rollout_trajectory(
         total_xp=total_xp_gained,
         num_actions=num_actions,
         num_valid_actions=num_valid,
+        num_lookups=num_lookups,
         num_level_ups=num_level_ups,
         total_gen_tokens=total_gen_tokens,
         final_state=state,
