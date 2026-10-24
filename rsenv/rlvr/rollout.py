@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from pydantic import ValidationError
 
 from rsenv.rlvr.contracts import (
+    ActionOutcome,
     EpisodeResult,
     InfrastructureError,
     Observation,
@@ -18,6 +19,7 @@ from rsenv.rlvr.contracts import (
     Transition,
     fingerprint,
 )
+from rsenv.rlvr.records import Recorder
 from rsenv.rlvr.tasks import verify_harvest, verify_reset
 from rsenv.tool_parser import extract_tool_calls
 from rsenv.tools import TOOL_MODELS
@@ -33,7 +35,7 @@ class EpisodeClient(Protocol):
     episode_id: str
 
     def start(self) -> Observation: ...
-    def act(self, name: str, arguments: dict[str, Any], timeout: float) -> Any: ...
+    def act(self, name: str, arguments: dict[str, Any], timeout: float) -> ActionOutcome: ...
     def stop(self) -> None: ...
 
 
@@ -79,20 +81,23 @@ class ScriptedPolicy:
     def __init__(self, fail: bool = False, reset_probe: bool = False) -> None:
         self.fail = fail
         self.reset_probe = reset_probe
-        self.version = "reset-probe-v1" if reset_probe else "scripted-fail-v1" if fail else "scripted-gather-v1"
+        if reset_probe:
+            self.version = "reset-probe-v1"
+        elif fail:
+            self.version = "scripted-fail-v1"
+        else:
+            self.version = "scripted-gather-v1"
 
     def sample(self, messages: list[dict[str, str]], task: TaskSpec, seed: int, timeout: float) -> SampledTurn:
-        text = (
-            "I am finished."
-            if self.fail
-            else '<tool_call>{"name":"chopTree","arguments":{"tree_type":"Tree"}}</tool_call>'
-        )
         if self.reset_probe:
-            text = (
-                '<tool_call>{"name":"equipItem","arguments":{"item":"Bronze axe"}}</tool_call>'
-                if len(messages) == 2
-                else "Reset mutation complete."
-            )
+            if len(messages) == 2:
+                text = '<tool_call>{"name":"equipItem","arguments":{"item":"Bronze axe"}}</tool_call>'
+            else:
+                text = "Reset mutation complete."
+        elif self.fail:
+            text = "I am finished."
+        else:
+            text = '<tool_call>{"name":"chopTree","arguments":{"tree_type":"Tree"}}</tool_call>'
         return SampledTurn(
             prompt_ids=(),
             output_ids=(),
@@ -105,13 +110,15 @@ class ScriptedPolicy:
         )
 
 
-def rollout(client: EpisodeClient, task: TaskSpec, policy: Policy, seed: int, recorder: Any = None) -> EpisodeResult:
+def rollout(
+    client: EpisodeClient, task: TaskSpec, policy: Policy, seed: int, recorder: Recorder | None = None
+) -> EpisodeResult:
     started = time.monotonic()
     reset_seconds = 0.0
     receipt = None
     verification = None
     transitions: list[Transition] = []
-    actions = []
+    actions: list[ActionOutcome] = []
     status, reason = "failure", "model_final_answer"
     reward: float | None = 0.0
     try:
@@ -192,7 +199,7 @@ def rollout(client: EpisodeClient, task: TaskSpec, policy: Policy, seed: int, re
             status, reason = "truncated", "turn_limit"
     except Exception as exc:
         status, reward = "infra_invalid", None
-        reason = str(exc) if isinstance(exc, InfrastructureError) else type(exc).__name__
+        reason = str(exc) if isinstance(exc, InfrastructureError) else f"{type(exc).__name__}: {exc}"
     finally:
         try:
             client.stop()

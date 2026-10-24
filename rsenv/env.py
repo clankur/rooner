@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from xml.etree.ElementTree import Element, SubElement, indent, tostring
 
-import torch
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    import torch
     from transformers import AutoProcessor, PreTrainedModel
 
 from rsenv.client import RSClient
@@ -209,27 +209,14 @@ def load_prompt_bank(seed: int = 42) -> list[GameState]:
 
 @dataclass(frozen=True)
 class SkillingSpawn:
-    """A spawn that drops the bot where it can immediately train a skill.
-
-    Each scenario couples a location with the inventory needed to train there —
-    a gathering tool (axe/pickaxe/net), combat gear, or raw materials for a
-    processing skill — so a freshly-reset bot gains XP on its first action
-    instead of wandering. Coordinates and the safety notes below come from
-    rs-sdk/learnings/*.md. This replaces independently randomizing location,
-    tool, and skill — which spawned bots toolless or far from any resource, so
-    no XP could ever flow (exp 217: 0 XP across the whole run, every "valid"
-    action was walking or clicking menus).
-    """
+    """A skill location and the materials needed there."""
 
     name: str
     position: tuple[int, int]
     materials: dict[str, int]  # scenario-specific items, added on top of BASE_TOOLKIT
 
 
-# Every spawn carries this full kit so the bot must *choose* the right tool for
-# what's nearby — an axe is useless at the mine, a pickaxe useless at the trees,
-# a net useless against a cow. Being handed only the one correct tool made the
-# choice trivial; here the location decides which action actually pays off.
+# Every spawn gets the same tools; the policy chooses which fits the location.
 BASE_TOOLKIT: dict[str, int] = {
     "Bronze axe": 1,  # woodcutting
     "Bronze pickaxe": 1,  # mining
@@ -238,24 +225,15 @@ BASE_TOOLKIT: dict[str, int] = {
     "Wooden shield": 1,  # combat
 }
 
-# Only verified, level-1-friendly, low-risk scenarios. Deliberately excludes the
-# old generic spawns (general store — no resources) and the hazardous/broken
-# ones called out in the docs: Lumbridge Swamp mine (interactions fail
-# silently), Al Kharid mine (scorpions), Lumbridge Swamp fishing (no small-net
-# spots, level 20+ only). Material counts (12) comfortably exceed max_actions so
-# a rollout never runs dry mid-skill.
+# Level-one locations from rs-sdk/learnings; avoid broken or hazardous spawns.
 SKILLING_SPAWNS: list[SkillingSpawn] = [
-    # Gathering — the right tool is in the kit; the location picks which.
     SkillingSpawn("woodcutting", (3200, 3220), {}),  # Lumbridge trees
     SkillingSpawn("mining", (3285, 3365), {}),  # SE Varrock: copper/tin/iron
     SkillingSpawn("fishing", (3087, 3230), {}),  # Draynor: Net/Bait shrimp
-    # Combat — safe, low-level enemies; weapon + shield are in the kit.
     SkillingSpawn("combat_chickens", (3237, 3295), {}),  # very safe
     SkillingSpawn("combat_cows", (3253, 3290), {}),  # safe
     SkillingSpawn("combat_goblins", (3240, 3220), {}),  # mixed
-    # Thieving — pickpocket the men in Lumbridge castle courtyard; no tool needed.
     SkillingSpawn("thieving", (3222, 3218), {}),
-    # Processing — spawn at the station holding the raw materials.
     SkillingSpawn("cooking", (3211, 3215), {"Raw shrimps": 12}),  # range near Bob's Axes
     SkillingSpawn("fletching", (3200, 3220), {"Knife": 1, "Logs": 12}),  # knife on logs -> arrow shafts
     SkillingSpawn("smithing", (3188, 3421), {"Hammer": 1, "Bronze bar": 12}),  # Varrock west anvil
@@ -263,14 +241,7 @@ SKILLING_SPAWNS: list[SkillingSpawn] = [
 
 
 def random_starting_state(rng: random.Random) -> GameState:
-    """Pick a skilling scenario: a location plus the full toolkit (and any raw
-    materials), so the bot must decide which tool fits what's nearby instead of
-    being handed the one right answer.
-
-    Skills are left at baseline (Hitpoints 10, everything else 1) so XP and
-    level-ups come fast at low levels — maximizing the learning signal the
-    reward depends on.
-    """
+    """Start at a skill location with tools, materials, and baseline levels."""
     spawn = rng.choice(SKILLING_SPAWNS)
     return GameState(
         position=spawn.position,
@@ -285,11 +256,7 @@ def random_starting_state(rng: random.Random) -> GameState:
 
 @dataclass
 class RewardResult:
-    """Bundled return of compute_reward.
-
-    metrics maps each reward component to its contribution; `reward` is exactly
-    their sum, so wandb plots of the components explain the total.
-    """
+    """Reward and its additive components for logging."""
 
     reward: float
     num_level_ups: int
@@ -302,42 +269,26 @@ def compute_reward(
     num_valid: int,
     initial_skills: dict[str, int],
     final_skills: dict[str, int],
-    initial_position: tuple[int, int],
-    final_position: tuple[int, int],
     action_xp_history: list[tuple[str, dict[str, float]]],
     xp_multiplier: int = 1,
 ) -> RewardResult:
     """Compute trajectory reward."""
     reward_metrics: dict[str, float] = {}
 
-    # 1. XP reward
     effective_xp = sum(sum(xp.values()) for _, xp in action_xp_history) / xp_multiplier
     reward_metrics["xp"] = effective_xp / 100.0
 
-    # 2. Level-up bonus
     num_level_ups = sum(
         max(0, xp_to_level(final_skills[s]) - xp_to_level(initial_skills.get(s, 0))) for s in final_skills
     )
     reward_metrics["level_ups"] = 2.0 * num_level_ups
 
-    # 3. Per-action shaping. Exp 172 collapsed to emitting no tool calls:
-    # attempting actions netted -1 to -2.3 while doing nothing scored exactly 0,
-    # so the policy learned silence in 4 steps. Acting must strictly dominate
-    # inaction — but that guarantee comes from the no_actions floor below (a
-    # silent trajectory is -2.0, worse than the -0.5 worst acting case), not
-    # from the valid-action bonus. So the bonus only pays out when the
-    # trajectory made real progress (XP or a level-up); otherwise a run of
-    # valid-but-useless moves (e.g. 10 walkTo calls, all valid, zero XP) would
-    # earn net-positive reward and the policy could settle into a
-    # wander-for-reward local optimum. The invalid penalty stays small so
-    # exploration survives it.
+    # Reward useful actions without making XP-free wandering profitable.
     made_progress = total_xp_gained > 0 or num_level_ups > 0
     reward_metrics["valid_actions"] = 0.1 * num_valid if made_progress else 0.0
     reward_metrics["invalid_actions"] = -0.05 * (num_actions - num_valid)
 
-    # 4. No-tool-call trajectory is the worst outcome — below the worst acting
-    # trajectory (all-invalid = -0.5 at max_actions=10), so mixed groups always
-    # have advantage pointing toward acting.
+    # At the default ten-action budget, attempting actions beats silence.
     reward_metrics["no_actions"] = -2.0 if num_actions == 0 else 0.0
 
     reward = sum(reward_metrics.values())
@@ -364,6 +315,8 @@ def rollout_trajectory(
     If client is provided, actions execute through it (sim or live).
     If client is None, a temporary SimClient is created from initial_state.
     """
+    import torch
+
     if client is not None:
         state = client.reset(initial_state)
     else:
@@ -375,7 +328,6 @@ def rollout_trajectory(
     tokenizer = processor.tokenizer
     initial_xp = state.total_xp()
     initial_skills = dict(state.skills)
-    initial_position = state.world_position
     messages = build_messages(state)
 
     inputs = processor.apply_chat_template(
@@ -495,8 +447,6 @@ def rollout_trajectory(
         num_valid=num_valid,
         initial_skills=initial_skills,
         final_skills=state.skills,
-        initial_position=initial_position,
-        final_position=state.world_position,
         action_xp_history=action_xp_history,
         xp_multiplier=xp_multiplier,
     )

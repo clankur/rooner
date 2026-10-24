@@ -11,7 +11,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rsenv.rlvr.bridge import VerifiedBridgeClient
 from rsenv.rlvr.contracts import EpisodeResult, InfrastructureError, TaskSpec, fingerprint
@@ -20,6 +20,9 @@ from rsenv.rlvr.records import Recorder, atomic_json
 from rsenv.rlvr.rollout import Policy, rollout
 from rsenv.rlvr.worlds import SDK_REVISION, WorldLease
 
+if TYPE_CHECKING:
+    from rsenv.rlvr.tinker_backend import TinkerBackend
+
 
 def collect(
     task: TaskSpec, policy: Policy, count: int, workers: int, seed: int, directory: Path, recorder: Recorder
@@ -27,7 +30,7 @@ def collect(
     if count < 1 or workers < 1:
         raise ValueError("Positive episode and worker counts required")
 
-    clients = []
+    clients: list[VerifiedBridgeClient] = []
     clients_lock = threading.Lock()
     cancelled = threading.Event()
 
@@ -134,7 +137,7 @@ def summary(episodes: list[EpisodeResult], wall_seconds: float) -> dict[str, Any
 
 
 def train(
-    backend: Any,
+    backend: TinkerBackend,
     tasks: list[TaskSpec],
     directory: Path,
     workers: int = 1,
@@ -152,14 +155,14 @@ def train(
     run_id = uuid.uuid4().hex[:12]
     policy = backend.sampling_policy(f"{run_id}-initial")
     training_config = {
-        "lora_rank": getattr(backend, "rank", 16),
+        "lora_rank": backend.rank,
         "clip_low": 0.8,
         "clip_high": 1.2,
         "temperature": 1.0,
         "max_tokens": 512,
         "thinking": False,
         "kl_beta": 0.0,
-        "renderer": getattr(policy, "renderer", "scripted-v1"),
+        "renderer": policy.renderer,
         "advantage_normalization": "population_std",
         "trajectory_weighting": "mean_generated_tokens",
     }

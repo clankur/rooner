@@ -13,6 +13,7 @@ import time
 import uuid
 from dataclasses import asdict
 from pathlib import Path
+from types import FrameType
 
 from rsenv.rlvr.contracts import EpisodeResult, TaskSpec, fingerprint
 from rsenv.rlvr.learning import build_examples
@@ -138,7 +139,7 @@ def main(argv: list[str] | None = None) -> None:
     previous_term_handler = None
     if threading.current_thread() is threading.main_thread():
 
-        def interrupt(signum, frame):
+        def interrupt(signum: int, frame: FrameType | None) -> None:
             raise KeyboardInterrupt("RLVR collection interrupted")
 
         previous_term_handler = signal.signal(signal.SIGTERM, interrupt)
@@ -162,8 +163,6 @@ def main(argv: list[str] | None = None) -> None:
                 resume_path=resumed["training_path"] if resumed else args.checkpoint,
             )
             if args.command == "train":
-                if args.greedy:
-                    parser.error("--greedy is evaluation-only")
                 result = train(
                     backend,
                     tasks,

@@ -3,50 +3,56 @@
 from __future__ import annotations
 
 import math
-import queue
 import threading
-from typing import Any
+from collections.abc import Callable
+from concurrent.futures import Future, wait
+from functools import partial
+from typing import TYPE_CHECKING, TypeVar
 
 from rsenv.rlvr.contracts import InfrastructureError, SampledTurn, TaskSpec, fingerprint
 from rsenv.rlvr.learning import TrainingExample
 from rsenv.tools import TOOL_SCHEMAS
 
+if TYPE_CHECKING:
+    from tinker import SamplingClient, TrainingClient
+    from transformers import PreTrainedTokenizerBase
 
-def bounded_call(call: Any, timeout: float = 120) -> Any:
-    """Bound SDK setup calls, including the SDK's automatic billing pause."""
-    result: queue.Queue = queue.Queue(maxsize=1)
+T = TypeVar("T")
+
+
+def bounded_call(call: Callable[[], T], timeout: float = 120) -> T:
+    """Bound setup calls even when the SDK pauses indefinitely for billing."""
+    result: Future[T] = Future()
 
     def run() -> None:
         try:
-            result.put((True, call()))
+            result.set_result(call())
         except BaseException as exc:
-            result.put((False, exc))
+            result.set_exception(exc)
 
     threading.Thread(target=run, daemon=True).start()
-    try:
-        ok, value = result.get(timeout=timeout)
-    except queue.Empty as exc:
-        raise InfrastructureError("tinker_setup_deadline:check_service_and_billing") from exc
-    if not ok:
-        raise value
-    return value
+    if not wait([result], timeout=timeout).done:
+        raise InfrastructureError("tinker_setup_deadline:check_service_and_billing")
+    return result.result()
 
 
 class TinkerPolicy:
     def __init__(
         self,
-        sampler: Any,
-        tokenizer: Any,
+        sampler: SamplingClient,
+        tokenizer: PreTrainedTokenizerBase,
         version: str,
         max_tokens: int = 512,
         max_context: int = 16384,
         temperature: float = 1.0,
     ) -> None:
-        self.sampler, self.tokenizer, self.version = sampler, tokenizer, version
-        self.max_tokens, self.max_context, self.temperature = max_tokens, max_context, temperature
-        self.renderer = (
-            f"{tokenizer.name_or_path}:chat-template-v1:{fingerprint(getattr(tokenizer, 'chat_template', None))}"
-        )
+        self.sampler = sampler
+        self.tokenizer = tokenizer
+        self.version = version
+        self.max_tokens = max_tokens
+        self.max_context = max_context
+        self.temperature = temperature
+        self.renderer = f"{tokenizer.name_or_path}:chat-template-v1:{fingerprint(tokenizer.chat_template)}"
 
     def sample(self, messages: list[dict[str, str]], task: TaskSpec, seed: int, timeout: float) -> SampledTurn:
         import tinker
@@ -122,28 +128,26 @@ class TinkerBackend:
         self.service = tinker.ServiceClient(display_name="RuneScape RLVR")
         self.model = model
         self.rank = rank
-        self.trainer = None
+        self.trainer: TrainingClient | None = None
         try:
             supported = {m.model_name for m in bounded_call(self.service.get_server_capabilities, 30).supported_models}
             if model not in supported:
                 raise InfrastructureError(f"unsupported_tinker_model:{model}")
             if training:
-                self.trainer = bounded_call(
-                    lambda: (
-                        self.service.create_training_client_from_state_with_optimizer(resume_path)
-                        if resume_path
-                        else self.service.create_lora_training_client(base_model=model, rank=rank, seed=seed)
+                if resume_path:
+                    self.trainer = bounded_call(
+                        partial(self.service.create_training_client_from_state_with_optimizer, resume_path)
                     )
-                )
+                else:
+                    self.trainer = bounded_call(
+                        partial(self.service.create_lora_training_client, base_model=model, rank=rank, seed=seed)
+                    )
                 self.tokenizer = self.trainer.get_tokenizer()
             else:
-                sampler = bounded_call(
-                    lambda: (
-                        self.service.create_sampling_client(model_path=resume_path)
-                        if resume_path
-                        else self.service.create_sampling_client(base_model=model)
-                    )
-                )
+                if resume_path:
+                    sampler = bounded_call(partial(self.service.create_sampling_client, model_path=resume_path))
+                else:
+                    sampler = bounded_call(partial(self.service.create_sampling_client, base_model=model))
                 self.tokenizer = sampler.get_tokenizer()
                 self.policy = TinkerPolicy(sampler, self.tokenizer, resume_path or model)
         except BaseException:
@@ -194,13 +198,13 @@ class TinkerBackend:
         metrics = {k: float(v) for k, v in result.metrics.items()}
         if not metrics or any(not math.isfinite(v) for v in metrics.values()):
             raise InfrastructureError("nonfinite_training_metrics")
-        for output in getattr(result, "loss_fn_outputs", []):
+        for output in result.loss_fn_outputs:
             for tensor in output.values():
                 if any(not math.isfinite(value) for value in tensor.data):
                     raise InfrastructureError("nonfinite_training_output")
         # Do not retry this operation at application level. The committed checkpoint is the recovery boundary.
         step = self.trainer.optim_step(tinker.types.AdamParams(learning_rate=learning_rate)).result(timeout=120)
-        step_metrics = {f"optimizer/{k}": float(v) for k, v in (getattr(step, "metrics", None) or {}).items()}
+        step_metrics = {f"optimizer/{k}": float(v) for k, v in (step.metrics or {}).items()}
         if any(not math.isfinite(v) for v in step_metrics.values()):
             raise InfrastructureError("nonfinite_optimizer_metrics")
         metrics.update(step_metrics)

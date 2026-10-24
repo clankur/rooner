@@ -1,4 +1,4 @@
-"""Verified episode transport extending the existing live BridgeClient boundary."""
+"""JSON-line transport for isolated live episodes."""
 
 from __future__ import annotations
 
@@ -12,19 +12,21 @@ import time
 from contextlib import suppress
 from typing import Any
 
-from rsenv.client import BridgeClient
 from rsenv.rlvr.contracts import ActionOutcome, InfrastructureError, Observation, TaskSpec
 from rsenv.rlvr.tasks import verify_reset
 from rsenv.rlvr.worlds import BRIDGE_DIR, WorldLease
 
 
-class VerifiedBridgeClient(BridgeClient):
+class VerifiedBridgeClient:
     """Cold reset is owned by the lease; protocol errors poison the entire episode."""
 
     def __init__(self, lease: WorldLease, task: TaskSpec, episode_id: str) -> None:
-        super().__init__()
-        self.lease, self.task, self.episode_id = lease, task, episode_id
-        self.responses: queue.Queue = queue.Queue(maxsize=32)
+        self.lease = lease
+        self.task = task
+        self.episode_id = episode_id
+        self._process: subprocess.Popen[str] | None = None
+        self._reader_thread: threading.Thread | None = None
+        self.responses: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=32)
         self.request_number = 0
         self.observation: Observation | None = None
         self.poisoned = False
@@ -38,11 +40,8 @@ class VerifiedBridgeClient(BridgeClient):
                 if len(line) > 2_000_000:
                     raise ValueError("oversized response")
                 self.responses.put_nowait(json.loads(line))
-        except Exception:
-            try:
-                self.responses.put_nowait(None)
-            except queue.Full:
-                pass
+        except (ValueError, queue.Full):
+            pass
         finally:
             try:
                 self.responses.put_nowait(None)
@@ -107,14 +106,9 @@ class VerifiedBridgeClient(BridgeClient):
         verify_reset(self.task, self.observation)
         return self.observation
 
-    def reset(self, initial_state: Any = None) -> Observation:
-        if self.observation is not None:
-            raise InfrastructureError("reset_requires_fresh_lease")
-        return self.start()
-
     def rpc(self, operation: str, timeout: float, **arguments: Any) -> Any:
         with self._lock:
-            if self.poisoned or not self.is_running:
+            if self.poisoned or self._process is None or self._process.poll() is not None:
                 raise InfrastructureError("bridge_unavailable")
             self.request_number += 1
             request_id = str(self.request_number)
@@ -180,6 +174,7 @@ class VerifiedBridgeClient(BridgeClient):
                 with suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGKILL)
                 process.wait(timeout=5)
+            assert self._reader_thread is not None
             self._reader_thread.join(timeout=1)
             # A descendant can retain stdout. Never block cleanup on the reader's IO lock.
             for stream in (process.stdin, process.stdout if not self._reader_thread.is_alive() else None):

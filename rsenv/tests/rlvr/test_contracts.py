@@ -287,6 +287,7 @@ def test_checkpoint_commit_waits_for_sampler_refresh(initial, monkeypatch, tmp_p
 
     class Backend:
         model = "test"
+        rank = 16
 
         def __init__(self):
             self.updates = 0
@@ -294,7 +295,9 @@ def test_checkpoint_commit_waits_for_sampler_refresh(initial, monkeypatch, tmp_p
         def sampling_policy(self, name):
             if self.updates:
                 raise InfrastructureError("sampler_export_failed")
-            return ScriptedPolicy()
+            policy = ScriptedPolicy()
+            policy.renderer = "scripted-v1"
+            return policy
 
         def save_state(self, name):
             return "optimizer-initial" if not self.updates else "optimizer-new"

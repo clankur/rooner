@@ -1,6 +1,6 @@
 # Live RuneScape RLVR
 
-The `rsenv.rlvr` runner uses isolated real 2004scape worlds through `VerifiedBridgeClient`, a `BridgeClient` subclass. Task specifications provide training goals, starting fixtures, budgets, and reward verifiers. The initial goal is to harvest and retain five normal logs. Mining requires its own action/evidence implementation before it can be added.
+The `rsenv.rlvr` runner uses isolated real 2004scape worlds through `VerifiedBridgeClient`. Its episode protocol is separate from the legacy `BridgeClient`. Task specifications provide training goals, starting fixtures, budgets, and reward verifiers. The initial goal is to harvest and retain five normal logs. Mining requires its own action/evidence implementation before it can be added.
 
 ## Runtime
 

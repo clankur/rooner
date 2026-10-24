@@ -475,26 +475,14 @@ class BridgeClientPool:
                 if level > baseline:
                     client.send_admin_command(f"::setstat {skill_name} {level}")
 
-        # Top up inventory to the target counts, giving only the deficit between
-        # what the bot already holds and the target. Deficit (not blind re-give)
-        # matters because tools don't stack: re-handing the kit every reset would
-        # fill the 28 slots with duplicate axes/swords within a few resets and
-        # stall skilling.
-        #
-        # Known limitation: ::minme/::tele/::give never *clear* the pack, so
-        # non-kit items the bot produced last rollout (logs, ore, cooked food,
-        # arrow shafts) survive the reset and slowly accumulate. Fully clearing
-        # them needs an inventory-wipe admin command, which the LostCity engine
-        # does not expose (ClientCheatHandler has no `clearinv`; invClear is
-        # internal-only) — closing that gap requires a server-side cheat in the
-        # rs-sdk repo, out of scope here.
+        # Give only deficits: tools do not stack and duplicate kits fill the pack.
+        # Produced items still accumulate; the engine has no inventory-clear cheat.
         held = client.get_state().get_inventory()
         for name, count in target.get_inventory().items():
             deficit = count - held.get(name, 0)
             if deficit > 0:
                 client.send_admin_command(f"::give {name} {deficit}")
 
-        # Return the post-give state so callers see the actual inventory.
         return client.get_state()
 
     def __len__(self) -> int:

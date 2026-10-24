@@ -24,6 +24,7 @@ def test_sampling_preserves_tool_tokens_and_behavior_probabilities():
     class Tokenizer:
         name_or_path = "test"
         eos_token_id = 99
+        chat_template = "test-template"
 
         def apply_chat_template(self, messages, **kwargs):
             assert kwargs["enable_thinking"] is False and kwargs["tools"]
@@ -61,12 +62,12 @@ def test_optimizer_payload_and_nonfinite_guard():
             assert loss_fn_config == {"clip_low_threshold": 0.8, "clip_high_threshold": 1.2}
             assert list(data[0].loss_fn_inputs["advantages"].data) == [0.0, 0.5]
             assert list(data[0].loss_fn_inputs["logprobs"].data) == [0.0, -1.0]
-            return Future(SimpleNamespace(metrics={"loss:sum": self.loss}))
+            return Future(SimpleNamespace(metrics={"loss:sum": self.loss}, loss_fn_outputs=[]))
 
         def optim_step(self, params):
             assert params.learning_rate == 1e-5
             self.steps += 1
-            return Future(None)
+            return Future(SimpleNamespace(metrics=None))
 
     backend = object.__new__(TinkerBackend)
     backend.trainer = Trainer()
@@ -85,3 +86,13 @@ def test_setup_deadline_bounds_paused_sdk():
             bounded_call(release.wait, timeout=0.005)
     finally:
         release.set()
+
+
+@pytest.mark.parametrize("error", [ValueError("setup failed"), TimeoutError("service timed out")])
+def test_setup_preserves_service_errors(error: Exception) -> None:
+    def fail() -> None:
+        raise error
+
+    with pytest.raises(type(error)) as caught:
+        bounded_call(fail)
+    assert caught.value is error

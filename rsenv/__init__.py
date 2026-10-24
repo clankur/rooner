@@ -1,19 +1,27 @@
-"""RuneScape environment; heavy legacy training exports load only on demand."""
-from importlib import import_module
-from typing import Any
+"""rsenv — RuneScape environment for LLM agent training.
 
-_EXPORTS = {
-    **dict.fromkeys(("BridgeClient", "BridgeClientPool", "RSClient", "SimClient"), "rsenv.client"),
-    **dict.fromkeys(("compute_reward", "format_state", "load_prompt_bank", "random_starting_state", "rollout_trajectory"), "rsenv.env"),
-    **dict.fromkeys(("GameState", "Trajectory"), "rsenv.state"),
-    **dict.fromkeys(("TOOL_SCHEMAS", "parse_tool_call", "parse_tool_calls"), "rsenv.tools"),
-}
-__all__ = list(_EXPORTS)
+Black-box game interface: train.py imports the trajectory rollout and
+prompt bank, everything else (simulator, bridge, tools, prompts) is internal.
+"""
 
+from rsenv.client import BridgeClient, BridgeClientPool, RSClient, SimClient
+from rsenv.env import compute_reward, format_state, load_prompt_bank, random_starting_state, rollout_trajectory
+from rsenv.state import GameState, Trajectory
+from rsenv.tools import TOOL_SCHEMAS, parse_tool_call, parse_tool_calls
 
-def __getattr__(name: str) -> Any:
-    if name not in _EXPORTS:
-        raise AttributeError(name)
-    value = getattr(import_module(_EXPORTS[name]), name)
-    globals()[name] = value
-    return value
+__all__ = [
+    "BridgeClient",
+    "BridgeClientPool",
+    "GameState",
+    "RSClient",
+    "SimClient",
+    "TOOL_SCHEMAS",
+    "Trajectory",
+    "compute_reward",
+    "format_state",
+    "load_prompt_bank",
+    "parse_tool_call",
+    "parse_tool_calls",
+    "random_starting_state",
+    "rollout_trajectory",
+]

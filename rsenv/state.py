@@ -138,13 +138,7 @@ class GameState:
         return sum(self.inventory.values())
 
     def get_inventory(self) -> dict[str, int]:
-        """Normalize inventory to name->count, summing duplicate slots.
-
-        GameState carries two representations: inventory_slots (populated from
-        the live game) and the simpler inventory dict (sim and spawn defs).
-        Callers that just need item counts should use this instead of branching
-        on which one is populated.
-        """
+        """Count items by name in either live slots or the simulator inventory."""
         if self.inventory_slots:
             items: dict[str, int] = {}
             for slot in self.inventory_slots:

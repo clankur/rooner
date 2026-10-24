@@ -7,7 +7,51 @@ import ObjType from '#/cache/config/ObjType.js';
 import LocType from '#/cache/config/LocType.js';
 import VarPlayerType from '#/cache/config/VarPlayerType.js';
 
-const fixture = JSON.parse(fs.readFileSync(process.env.RLVR_FIXTURE!, 'utf8'));
+export interface Item {
+    slot: number;
+    id: number;
+    count: number;
+}
+
+export interface Resource {
+    id: number;
+    x: number;
+    z: number;
+    name: string;
+}
+
+interface ResetFixture {
+    position: [number, number, number];
+    xp_tenths: number[];
+    levels: number[];
+    inventory: Item[];
+    tutorial: number;
+}
+
+export interface Observation {
+    episode_id: string;
+    world_id: string;
+    sequence: number;
+    tick: number;
+    position: [number, number, number];
+    xp_tenths: number[];
+    levels: number[];
+    inventory: Item[];
+    equipment: Item[];
+    bank: Item[];
+    hp: number;
+    pending: boolean;
+    tutorial: number;
+    resources: Resource[];
+    in_game: boolean;
+    runtime: {
+        engine_rss_bytes: number;
+        engine_cpu_seconds: number;
+        wall_seconds: number;
+    };
+}
+
+const fixture: ResetFixture = JSON.parse(fs.readFileSync(process.env.RLVR_FIXTURE!, 'utf8'));
 const username = process.env.RLVR_USERNAME!;
 const token = process.env.RLVR_CONTROL_TOKEN!;
 let sequence = 0;
@@ -47,11 +91,13 @@ function cancel(p: Player): void {
     p.playAnimation(-1, 0);
 }
 
-function snapshot(): object {
+function snapshot(): Observation {
     const p = player();
-    const items = (name: string) => p.getInventory(InvType.getId(name))!.items.flatMap(
-        (item, slot) => item ? [{ slot, id: item.id, count: item.count }] : []);
-    const resources: object[] = [];
+    const items = (name: string): Item[] =>
+        p
+            .getInventory(InvType.getId(name))!
+            .items.flatMap((item, slot) => (item ? [{ slot, id: item.id, count: item.count }] : []));
+    const resources: Resource[] = [];
     const zones = new Set<number>();
     for (let x = p.x - 16; x <= p.x + 16; x++) {
         for (let z = p.z - 16; z <= p.z + 16; z++) {
@@ -65,23 +111,37 @@ function snapshot(): object {
             }
         }
     }
-    resources.sort((a: any, b: any) => a.x - b.x || a.z - b.z || a.id - b.id);
+    resources.sort((a, b) => a.x - b.x || a.z - b.z || a.id - b.id);
     return {
-        episode_id: process.env.RLVR_EPISODE_ID, world_id: process.env.RLVR_WORLD_ID,
-        sequence: ++sequence, tick: World.currentTick, position: [p.x, p.z, p.level],
-        xp_tenths: Array.from(p.stats), levels: Array.from(p.levels),
-        inventory: items('inv'), equipment: items('worn'), bank: items('bank'),
-        hp: p.levels[3], pending: p.hasInteraction() || p.waypointIndex >= 0 || p.activeScript !== null,
-        tutorial: p.getVar(VarPlayerType.getId('tutorial')), resources, in_game: p.slot >= 0,
-        runtime: { engine_rss_bytes: process.memoryUsage().rss, engine_cpu_seconds:
-            (process.cpuUsage().user + process.cpuUsage().system) / 1e6, wall_seconds: performance.now() / 1000 },
+        episode_id: process.env.RLVR_EPISODE_ID!,
+        world_id: process.env.RLVR_WORLD_ID!,
+        sequence: ++sequence,
+        tick: World.currentTick,
+        position: [p.x, p.z, p.level],
+        xp_tenths: Array.from(p.stats),
+        levels: Array.from(p.levels),
+        inventory: items('inv'),
+        equipment: items('worn'),
+        bank: items('bank'),
+        hp: p.levels[3],
+        pending: p.hasInteraction() || p.waypointIndex >= 0 || p.activeScript !== null,
+        tutorial: p.getVar(VarPlayerType.getId('tutorial')) as number,
+        resources,
+        in_game: p.slot >= 0,
+        runtime: {
+            engine_rss_bytes: process.memoryUsage().rss,
+            engine_cpu_seconds: (process.cpuUsage().user + process.cpuUsage().system) / 1e6,
+            wall_seconds: performance.now() / 1000,
+        },
     };
 }
 
 export function startControl(): void {
     if (!token || !process.env.RLVR_EPISODE_ID) throw new Error('Missing private RLVR identity');
-    Bun.serve({ hostname: '127.0.0.1', port: Number(process.env.RLVR_CONTROL_PORT),
-        async fetch(req) {
+    Bun.serve({
+        hostname: '127.0.0.1',
+        port: Number(process.env.RLVR_CONTROL_PORT),
+        fetch(req: Request): Response {
             if (req.headers.get('authorization') !== `Bearer ${token}`) return new Response('', { status: 403 });
             try {
                 const path = new URL(req.url).pathname;
@@ -91,7 +151,9 @@ export function startControl(): void {
                     const p = player();
                     cancel(p);
                     p.activeScript = null;
-                    p.queue.clear(); p.weakQueue.clear(); p.engineQueue.clear();
+                    p.queue.clear();
+                    p.weakQueue.clear();
+                    p.engineQueue.clear();
                     // Login timers remain real engine timers, reset to a common episode origin.
                     for (const timer of p.timers.values()) timer.clock = World.currentTick;
                     initializePlayer(p);
@@ -108,6 +170,6 @@ export function startControl(): void {
             } catch (err) {
                 return Response.json({ error: String(err) }, { status: 409 });
             }
-        }
+        },
     });
 }
