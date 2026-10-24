@@ -64,4 +64,4 @@ Samples are saved before action execution. Each record append is flushed and syn
 
 `checkpoint.json` stores the committed optimizer and sampler paths. An update is committed after optimizer-state saving and sampler refresh succeed. `pending-update.json` records an interrupted update; resume forks from the last committed optimizer state.
 
-[Validation results](live-rlvr-validation.md) cover live gathering, equipment resets, replay, and cancellation cleanup. Hosted sampling/update/resume remains unvalidated after a billing error. Clean-machine setup, broader reset mutations, and exhaustive transport failures remain open checks.
+[Validation results](live-rlvr-validation.md) cover live gathering, equipment resets, replay, cancellation cleanup, and a small hosted training run. Clean-machine setup, full training resume, broader reset mutations, and exhaustive transport failures remain open checks.

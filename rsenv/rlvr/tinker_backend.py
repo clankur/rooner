@@ -7,7 +7,7 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import Future, wait
 from functools import partial
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 from rsenv.rlvr.contracts import InfrastructureError, SampledTurn, TaskSpec, fingerprint
 from rsenv.rlvr.learning import TrainingExample
@@ -152,7 +152,7 @@ class TinkerBackend:
                 self.policy = TinkerPolicy(sampler, self.tokenizer, resume_path or model)
         except BaseException:
             try:
-                self.close()
+                self.close("errored")
             except Exception:
                 pass  # Preserve the setup failure if service teardown also fails.
             raise
@@ -210,5 +210,5 @@ class TinkerBackend:
         metrics.update(step_metrics)
         return metrics
 
-    def close(self) -> None:
-        self.service.close().result(timeout=5)
+    def close(self, status: Literal["success", "errored", "interrupted"] = "success") -> None:
+        self.service.close(status).result(timeout=5)

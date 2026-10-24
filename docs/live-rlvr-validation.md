@@ -1,6 +1,6 @@
 # Local RLVR validation — 2026-10-23
 
-The live environment path is exercised on this macOS workspace. Hosted learning is implemented but remains unvalidated because Tinker returned HTTP 402, blocking access on billing status. No hosted optimizer update or learning improvement is claimed.
+The live environment path is exercised on this macOS workspace. Hosted validation was initially blocked by Tinker billing. The 2026-10-24 hosted experiment below exercised real sampling and optimizer updates. No learning improvement is claimed.
 
 ## Passed checks
 
@@ -30,7 +30,7 @@ These are small, stochastic local measurements. They demonstrate functioning con
 
 Machine-readable evidence is under `outputs/rlvr-validation/`: `validation.json`, `reset-100/`, `profile/`, `failing-control/`, `cancellation/`, and `tinker-preflight.json`. Output directories are intentionally ignored by git. Episode JSONL includes immutable sampled-token records and authoritative before/after action states; run manifests identify the source and configuration used by each run.
 
-Still required: a funded Tinker account to verify real sampling, a non-degenerate GRPO update, sampler refresh, optimizer-state resume, and checkpoint evaluation. Clean-machine provisioning and broader reset fault/mutation coverage (including banking) remain independent acceptance work. The successful reset soak covers equipment mutation, while gathering runs cover XP changes and depleted trees. Game RNG remains uncontrolled.
+At this stage, billing blocked real sampling, a non-degenerate GRPO update, sampler refresh, optimizer-state resume, and checkpoint evaluation. The later hosted experiment below covers sampling, updates, and sampler refresh. Clean-machine provisioning and broader reset fault/mutation coverage (including banking) remain independent acceptance work. The successful reset soak covers equipment mutation, while gathering runs cover XP changes and depleted trees. Game RNG remains uncontrolled.
 
 See [Live RLVR setup and operation](live-rlvr.md) for commands and contracts.
 
@@ -48,3 +48,26 @@ See [Live RLVR setup and operation](live-rlvr.md) for commands and contracts.
 - The four-episode smoke passed in **42.97 seconds** with two successful gathers, the expected zero-reward controls, matching reset fingerprints, distinct worlds, four replayed episodes, and no infrastructure failures. Artifacts are in `outputs/pr9-live-only-smoke/`.
 - The pinned browser dependencies installed with `bun install --frozen-lockfile`. Python lint/format checks, bridge bundling, setup-script syntax, and whitespace checks passed.
 - This run reused the installed pinned game SDK. Clean-machine provisioning and hosted learning remain unvalidated.
+
+## Hosted experiment — 2026-10-24
+
+```sh
+uv run --locked python -m rsenv.rlvr train --manifest configs/rlvr-smoke.json --workers 2 --group-size 4 --iterations 2 --output outputs/tinker-small-20261024-fixed
+uv run --locked python -m rsenv.rlvr replay --manifest configs/rlvr-smoke.json --records outputs/tinker-small-20261024-fixed/episodes.jsonl
+```
+
+The first attempt exposed a missing Jinja2 runtime dependency and an outdated `ServiceClient.close()` call. Jinja2 is now a direct locked dependency, and cleanup passes the session outcome required by Tinker 0.35.0. Regression tests exercise actual Transformers template rendering and validate cleanup against the installed SDK signature. All 55 tests pass; focused lint, formatting, and whitespace checks pass.
+
+The corrected run used Qwen/Qwen3.5-4B, seed 42, LoRA rank 16, and learning rate `1e-5`:
+
+- Eight valid episodes in eight separate worlds, one initial-state fingerprint, and zero infrastructure failures.
+- Five successful gathers; three episodes exhausted the six-turn budget. Rewards were `[1, 0, 1, 1]` and `[1, 1, 0, 0]` in completion order.
+- All 33 sampled decisions parsed as supported actions; 2,589 generated tokens.
+- Two optimizer updates with finite losses (`0.00057916`, `0.00050427`), saved optimizer state, and refreshed sampler weights. The second batch used the first update's sampler.
+- Replay verified all eight rewards and both training-conversion hashes. The CLI exited successfully, no pending update remained, and no owned game or training processes remained.
+
+A forward-only diagnostic restored the initial optimizer checkpoint and recomputed the first batch. Across 954 generated tokens, the mean trainer/sampler probability ratio was `0.999406`, mean absolute log-ratio `0.011758`, and clipped fraction `0.006289`. The independently computed masked PPO loss (`0.0005791544`) matched the service loss (`0.0005791485`) within `6e-9`, using the [documented PPO objective](https://tinker-docs.thinkingmachines.ai/tinker/losses/ppo/). The service's aggregate KL/clipping diagnostics were much larger; this comparison indicates they include prompt positions with placeholder behavior probabilities. They should not be interpreted as generated-token policy drift.
+
+Artifacts are in `outputs/tinker-small-20261024-fixed/`: `experiment-summary.json`, `probability-check.json`, `check_probabilities.py`, `checkpoint.json`, and `episodes.jsonl`. The earlier failed attempt is preserved in `outputs/tinker-small-20261024/`.
+
+This validates hosted sampling, nonzero-signal updates, sampler refresh, checkpoint saving, and checkpoint restoration for a forward pass. It does not establish learning improvement: batch success rates were 75% and 50%, with only four episodes each. Full training resume, held-out checkpoint evaluation, and billed cost measurement remain unchecked. The live SDK was copied from the existing pinned installation; this was not a clean-machine provisioning test.

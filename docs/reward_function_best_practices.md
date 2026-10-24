@@ -29,4 +29,4 @@ Each turn uses its recorded prompt and generated token IDs. Inputs and targets a
 
 Tinker's PPO loss sums token contributions with ratio clipping at `[0.8, 1.2]`. Dividing by each episode's generated-token count and the group size gives each episode equal weight. The adapter sends these weights directly; it does not apply another mean reduction.
 
-Zero-variance groups skip optimization. The runner stops after twenty consecutive such groups. Tests check prompt masking and total episode weight for different trajectory lengths and group sizes. Hosted optimizer behavior still requires service validation.
+Zero-variance groups skip optimization. The runner stops after twenty consecutive such groups. Tests check prompt masking and total episode weight for different trajectory lengths and group sizes. A [hosted forward check](live-rlvr-validation.md) reproduced Tinker's PPO loss from generated-token probabilities and these weights.

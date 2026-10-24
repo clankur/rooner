@@ -4,6 +4,7 @@ import math
 import threading
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
+from unittest.mock import create_autospec
 
 import pytest
 
@@ -98,3 +99,28 @@ def test_setup_preserves_service_errors(error: Exception) -> None:
     with pytest.raises(type(error)) as caught:
         bounded_call(fail)
     assert caught.value is error
+
+
+def test_chat_template_renders_with_installed_dependencies() -> None:
+    from tokenizers import Tokenizer
+    from tokenizers.models import WordLevel
+    from transformers import PreTrainedTokenizerFast
+
+    tokenizer = PreTrainedTokenizerFast(
+        tokenizer_object=Tokenizer(WordLevel({"[UNK]": 0}, unk_token="[UNK]")),
+        chat_template="{% for message in messages %}{{ message['content'] }}{% endfor %}",
+    )
+    assert (
+        tokenizer.apply_chat_template([{"role": "user", "content": "Gather a log"}], tokenize=False) == "Gather a log"
+    )
+
+
+@pytest.mark.parametrize("status", ["success", "errored", "interrupted"])
+def test_service_cleanup_matches_installed_sdk(status: str) -> None:
+    import tinker
+
+    backend = object.__new__(TinkerBackend)
+    backend.service = create_autospec(tinker.ServiceClient, instance=True)
+    backend.close(status)
+    backend.service.close.assert_called_once_with(status)
+    backend.service.close.return_value.result.assert_called_once_with(timeout=5)

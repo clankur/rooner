@@ -8,6 +8,7 @@ import importlib.metadata
 import json
 import signal
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -209,7 +210,13 @@ def main(argv: list[str] | None = None) -> None:
         if previous_term_handler is not None:
             signal.signal(signal.SIGTERM, previous_term_handler)
         if backend:
-            backend.close()
+            error = sys.exception()
+            if isinstance(error, KeyboardInterrupt):
+                backend.close("interrupted")
+            elif error is not None:
+                backend.close("errored")
+            else:
+                backend.close("success")
 
 
 if __name__ == "__main__":

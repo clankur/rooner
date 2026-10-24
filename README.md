@@ -33,7 +33,7 @@ uv run python -m rsenv.rlvr train --resume outputs/train/checkpoint.json --itera
 uv run python -m rsenv.rlvr evaluate --checkpoint 'tinker://SAMPLER_PATH' --manifest configs/rlvr-heldout.json --episodes 10
 ```
 
-Training uses verified episode groups, masked token advantages, and equal trajectory weights. Optimizer state and sampler weights are checkpointed after each update. Hosted learning remains unvalidated pending Tinker billing access.
+Training uses verified episode groups, masked token advantages, and equal trajectory weights. Optimizer state and sampler weights are checkpointed after each update. A small hosted run exercised sampling, optimization, and checkpointing; see [validation results](docs/live-rlvr-validation.md). It does not establish learning improvement.
 
 ## Code
 
