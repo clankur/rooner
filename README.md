@@ -83,10 +83,10 @@ uv run python -m train --config-name=gpu_4090 ++paths.model_name=run_002 ++grpo.
 
 ```bash
 # Evaluate a Tinker sampler checkpoint through the live RLVR runner
-.venv/bin/python eval.py --checkpoint 'tinker://SAMPLER_PATH' --episodes 10
+uv run --no-project --with-requirements requirements-rlvr.txt python eval.py --checkpoint 'tinker://SAMPLER_PATH' --episodes 10
 
 # Frozen base policy, greedy decoding
-.venv/bin/python eval.py --episodes 10 --greedy
+uv run --no-project --with-requirements requirements-rlvr.txt python eval.py --episodes 10 --greedy
 ```
 
 ## Architecture

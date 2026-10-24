@@ -4,13 +4,11 @@ The `rsenv.rlvr` runner uses isolated real 2004scape worlds through `VerifiedBri
 
 ## Runtime
 
-Use Python 3.11+, Bun **1.3.14**, rs-sdk revision **66ed33320e719e92883d5fbfc05a0b091b54373f**, Puppeteer **24.43.1**, and Tinker **0.35.0**. The lightweight Python path avoids local torch and runq:
+Use Python 3.11+, Bun **1.3.14**, rs-sdk revision **66ed33320e719e92883d5fbfc05a0b091b54373f**, Puppeteer **24.43.1**, and Tinker **0.35.0**. Run from the repository root. `uv run` installs and reuses the pinned dependencies in `requirements-rlvr.txt`; `--no-project` avoids installing the legacy trainer’s torch and runq dependencies:
 
 ```sh
-uv venv .venv
-uv pip install --python .venv/bin/python -r requirements-rlvr.txt
 bash rsenv/bridge/rlvr/setup.sh
-.venv/bin/python -m rsenv.rlvr doctor
+uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr doctor
 ```
 
 The pinned setup script installs `rsenv/bridge/rs-sdk`, dependencies, packed content, the bot webclient, and Chrome. It refuses an existing checkout at a different revision. Clean-machine execution remains an acceptance check. The doctor checks the pinned revision, required build artifacts, and Puppeteer's configured browser executable. It is a preflight check, not proof that a browser can log in. Existing `rsenv/bridge/setup.sh` is a legacy floating-revision installer. If using a custom `PUPPETEER_CACHE_DIR`, keep that variable set for subsequent runs. To install a missing browser in the default cache, run `(cd rsenv/bridge && bun x puppeteer browsers install chrome)` without a cache override.
@@ -24,7 +22,7 @@ Run from the repository root. These commands start their own servers; no shared 
 For a small MacBook-friendly **real environment** smoke test:
 
 ```sh
-.venv/bin/python -m rsenv.rlvr smoke --manifest configs/rlvr-smoke.json --workers 2
+uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr smoke --manifest configs/rlvr-smoke.json --workers 2
 ```
 
 This runs four cold-start episodes: equip an axe, gather one log in each of two independent worlds, and end without gathering as a zero-reward control. It asserts the expected outcomes, identical initial fingerprints, distinct world IDs, equipment mutation, and reward replay from saved records. The production rollout closes each browser/server lease. `smoke.json` records phase latency and pass/fail; any failed assertion exits nonzero. Use `--workers 1` to reduce concurrent memory use. The default task is the same one-log fixture when `--manifest` is omitted; `--episodes` does not change this fixed four-episode suite. No model download, GPU, training, or Tinker account is needed.
@@ -32,12 +30,12 @@ This runs four cold-start episodes: equip an axe, gather one log in each of two 
 The smoke checks the real engine, browser login, bridge, action parsing/execution, observations, resets, reward verification, and recording/replay. It does not cover every tool or injected transport failure, independently prove process-leak absence, or test model token masks, hosted optimization, and checkpoint/resume. The focused unit suite covers failure contracts separately. Gameplay remains stochastic despite fixed starting state; a gameplay timeout fails this smoke rather than being silently retried.
 
 ```sh
-.venv/bin/python -m pytest rsenv/tests/rlvr -q
-.venv/bin/python -m rsenv.rlvr scripted --episodes 4 --workers 2 --output outputs/scripted
-.venv/bin/python -m rsenv.rlvr scripted --episodes 2 --fail-policy --output outputs/failing-control
-.venv/bin/python -m rsenv.rlvr profile --episodes 4 --output outputs/profile
-.venv/bin/python -m rsenv.rlvr reset-check --episodes 100 --workers 4 --output outputs/resets
-.venv/bin/python -m rsenv.rlvr replay --records outputs/scripted/episodes.jsonl
+uv run --no-project --with-requirements requirements-rlvr.txt python -m pytest rsenv/tests/rlvr -q
+uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr scripted --episodes 4 --workers 2 --output outputs/scripted
+uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr scripted --episodes 2 --fail-policy --output outputs/failing-control
+uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr profile --episodes 4 --output outputs/profile
+uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr reset-check --episodes 100 --workers 4 --output outputs/resets
+uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr replay --records outputs/scripted/episodes.jsonl
 ```
 
 `reset-check` collects fresh episodes, equips the axe, verifies that mutation completed, and checks initial fingerprints. These probes intentionally end without completing the gathering goal. It does not by itself exercise every possible XP/bank mutation or prove engine-wide deterministic replay; scripted gathering runs additionally exercise XP and depleted trees. `profile` measures 1/2/4 workers. Inspect both valid and infrastructure-invalid episode counts; success rates exclude invalid episodes and include Wilson intervals. Costs are explicitly unknown unless billing data is supplied; token counts are recorded.
@@ -47,10 +45,10 @@ The smoke checks the real engine, browser login, bridge, action parsing/executio
 Set `TINKER_API_KEY` in the environment. The account must have billing access.
 
 ```sh
-.venv/bin/python -m rsenv.rlvr evaluate --episodes 4 --workers 2 --output outputs/base
-.venv/bin/python -m rsenv.rlvr train --manifest configs/rlvr-train.json --workers 2 --group-size 4 --iterations 25 --output outputs/train
-.venv/bin/python -m rsenv.rlvr train --resume outputs/train/checkpoint.json --iterations 25
-.venv/bin/python eval.py --checkpoint 'tinker://SAMPLER_PATH' --manifest configs/rlvr-heldout.json --episodes 4 --output outputs/heldout
+uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr evaluate --episodes 4 --workers 2 --output outputs/base
+uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr train --manifest configs/rlvr-train.json --workers 2 --group-size 4 --iterations 25 --output outputs/train
+uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr train --resume outputs/train/checkpoint.json --iterations 25
+uv run --no-project --with-requirements requirements-rlvr.txt python eval.py --checkpoint 'tinker://SAMPLER_PATH' --manifest configs/rlvr-heldout.json --episodes 4 --output outputs/heldout
 ```
 
 The default model is `Qwen/Qwen3.5-4B`, LoRA rank 16, learning rate 1e-5, PPO clipping [0.8, 1.2], temperature 1, no top-k/top-p filtering, no thinking, and 512 generated tokens per turn. No KL term or dense reward is used. Support is checked against the account's service capabilities. Hosted sampling and optimization still require a successful live service validation; unit tests are not that validation.
