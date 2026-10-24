@@ -37,6 +37,7 @@ class Recorder:
         self.lock = threading.Lock()
 
     def append(self, kind: str, value: Any) -> None:
+        """Append a JSON record and fsync before returning."""
         line = json.dumps({"kind": kind, "data": value}, sort_keys=True, allow_nan=False)
         with self.lock, self.path.open("a") as stream:
             stream.write(line + "\n")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -16,7 +17,7 @@ from rsenv.rlvr.contracts import (
     SampledTurn,
     TaskSpec,
 )
-from rsenv.rlvr.learning import build_examples
+from rsenv.rlvr.learning import TrainingExample, build_examples
 from rsenv.rlvr.rollout import ScriptedPolicy, parse_action, rollout
 from rsenv.rlvr.tasks import verify_harvest, verify_reset
 
@@ -263,7 +264,9 @@ def test_degenerate_and_invalid_groups(initial: Observation) -> None:
         build_examples([group[0].model_copy(update={"transitions": (corrupted,)}), group[1]], 2)
 
 
-def test_entire_group_retried_after_infrastructure_failure(initial, monkeypatch, tmp_path):
+def test_entire_group_retried_after_infrastructure_failure(
+    initial: Observation, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from rsenv.rlvr import runner
     from rsenv.rlvr.records import Recorder
 
@@ -271,7 +274,7 @@ def test_entire_group_retried_after_infrastructure_failure(initial, monkeypatch,
     invalid = good[1].model_copy(update={"status": "infra_invalid", "reward": None})
     calls = []
 
-    def collect(*args):
+    def collect(*args: object) -> list[EpisodeResult]:
         calls.append(args)
         return [good[0], invalid] if len(calls) == 1 else good
 
@@ -280,7 +283,9 @@ def test_entire_group_retried_after_infrastructure_failure(initial, monkeypatch,
     assert len(calls) == 2 and calls[0][2] == calls[1][2] == 2
 
 
-def test_checkpoint_commit_waits_for_sampler_refresh(initial, monkeypatch, tmp_path):
+def test_checkpoint_commit_waits_for_sampler_refresh(
+    initial: Observation, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     import json
 
     from rsenv.rlvr import runner
@@ -289,20 +294,20 @@ def test_checkpoint_commit_waits_for_sampler_refresh(initial, monkeypatch, tmp_p
         model = "test"
         rank = 16
 
-        def __init__(self):
+        def __init__(self) -> None:
             self.updates = 0
 
-        def sampling_policy(self, name):
+        def sampling_policy(self, name: str) -> ScriptedPolicy:
             if self.updates:
                 raise InfrastructureError("sampler_export_failed")
             policy = ScriptedPolicy()
             policy.renderer = "scripted-v1"
             return policy
 
-        def save_state(self, name):
+        def save_state(self, name: str) -> str:
             return "optimizer-initial" if not self.updates else "optimizer-new"
 
-        def update(self, examples, lr):
+        def update(self, examples: list[TrainingExample], lr: float) -> dict[str, float]:
             self.updates += 1
             return {"loss": 0.1}
 
@@ -315,7 +320,7 @@ def test_checkpoint_commit_waits_for_sampler_refresh(initial, monkeypatch, tmp_p
     assert (tmp_path / "pending-update.json").exists() and backend.updates == 1
 
 
-def test_reward_and_receipt_corruption_rejected(initial):
+def test_reward_and_receipt_corruption_rejected(initial: Observation) -> None:
     group = episodes(initial)
     with pytest.raises(InfrastructureError, match="unverified_group_reward"):
         build_examples([group[0].model_copy(update={"reward": 1.0}), group[1]], 2)
@@ -324,7 +329,7 @@ def test_reward_and_receipt_corruption_rejected(initial):
         verify_harvest(TaskSpec(), receipt, [])
 
 
-def test_bridge_rejects_wrong_action_name(initial, monkeypatch):
+def test_bridge_rejects_wrong_action_name(initial: Observation, monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
     from rsenv.rlvr.bridge import VerifiedBridgeClient
@@ -336,10 +341,26 @@ def test_bridge_rejects_wrong_action_name(initial, monkeypatch):
     assert client.poisoned
 
 
-def test_unattributed_bank_mutation_invalidates_episode(initial):
+def test_unattributed_bank_mutation_invalidates_episode(initial: Observation) -> None:
     action = harvest(initial)
     action = action.model_copy(
         update={"after": action.after.model_copy(update={"bank": (Item(slot=0, id=1511, count=100),)})}
     )
     with pytest.raises(InfrastructureError, match="unattributed_progress"):
         verify_harvest(TaskSpec(), verify_reset(TaskSpec(), initial), [action])
+
+
+@pytest.mark.parametrize("group_size", [2, 4])
+def test_group_and_token_normalization(initial: Observation, group_size: int) -> None:
+    pair = episodes(initial)
+    group = [pair[i % 2].model_copy(update={"episode_id": f"episode-{i}"}) for i in range(group_size)]
+    batch = build_examples(group, group_size)
+    offset = 0
+    for episode in group:
+        turns = batch[offset : offset + len(episode.transitions)]
+        offset += len(episode.transitions)
+        expected_advantage = -1.0 if episode.reward == 0.0 else 1.0
+        assert sum(sum(turn.advantages) for turn in turns) == pytest.approx(expected_advantage / group_size)
+        for example in turns:
+            assert example.advantages[:2] == (0.0, 0.0)
+            assert len(example.input_ids) == len(example.targets) == len(example.advantages)

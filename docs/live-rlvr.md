@@ -1,36 +1,34 @@
 # Live RuneScape RLVR
 
-The `rsenv.rlvr` runner uses isolated real 2004scape worlds through `VerifiedBridgeClient`. Its episode protocol is separate from the legacy `BridgeClient`. Task specifications provide training goals, starting fixtures, budgets, and reward verifiers. The initial goal is to harvest and retain five normal logs. Mining requires its own action/evidence implementation before it can be added.
+`rsenv.rlvr` runs tasks in isolated 2004scape worlds through `VerifiedBridgeClient`. Each task defines a starting fixture, action and episode budgets, and a reward verifier. The initial task is to harvest and retain normal logs.
 
-## Runtime
+## Setup
 
-Use Python 3.11+, Bun **1.3.14**, rs-sdk revision **66ed33320e719e92883d5fbfc05a0b091b54373f**, Puppeteer **24.43.1**, and Tinker **0.35.0**. Run from the repository root. `uv run` installs and reuses the pinned dependencies in `requirements-rlvr.txt`; `--no-project` avoids installing the legacy trainer’s torch and runq dependencies:
+Use Python 3.11+, Bun **1.3.14**, rs-sdk revision **66ed33320e719e92883d5fbfc05a0b091b54373f**, Puppeteer **24.43.1**, and Tinker **0.35.0**. Run commands from the repository root. `uv run` manages the pinned Python dependencies in `requirements-rlvr.txt`; `--no-project` avoids installing the legacy trainer's torch and runq dependencies.
 
 ```sh
 bash rsenv/bridge/rlvr/setup.sh
 uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr doctor
 ```
 
-The pinned setup script installs `rsenv/bridge/rs-sdk`, dependencies, packed content, the bot webclient, and Chrome. It refuses an existing checkout at a different revision. Clean-machine execution remains an acceptance check. The doctor checks the pinned revision, required build artifacts, and Puppeteer's configured browser executable. It is a preflight check, not proof that a browser can log in. Existing `rsenv/bridge/setup.sh` is a legacy floating-revision installer. If using a custom `PUPPETEER_CACHE_DIR`, keep that variable set for subsequent runs. To install a missing browser in the default cache, run `(cd rsenv/bridge && bun x puppeteer browsers install chrome)` without a cache override.
+Setup installs the pinned SDK, game assets, dependencies, and Chrome. It rejects an existing SDK checkout at another revision. `doctor` checks these artifacts and browser availability. The legacy `rsenv/bridge/setup.sh` uses a floating SDK revision.
 
-Each episode starts a fresh engine, gateway, browser, and player save directory. Shared assets are read-only symlinks; engine source patches are applied to private copies. Normal server files and accounts are not modified. Ports are assigned per world. Logs and fixtures remain under the run's `worlds/` directory after processes stop.
+If Chrome is missing, run `(cd rsenv/bridge && bun x puppeteer browsers install chrome)`. Use the same `PUPPETEER_CACHE_DIR` for installation and execution when setting a custom cache.
 
-## Validation and collection
+Each episode owns a fresh engine, gateway, browser, and player save directory. Shared assets are symlinked; source patches apply to a private engine copy. Episode logs and fixtures remain in the run's `worlds/` directory after shutdown.
 
-Run from the repository root. These commands start their own servers; no shared server is needed.
+## Environment checks
 
-For a small MacBook-friendly **real environment** smoke test:
+The smoke command starts four episodes: equip an axe, gather one log in each of two worlds, and finish without gathering as a zero-reward control. It checks equipment mutation, rewards, matching initial fingerprints, distinct worlds, and replay of persisted evidence. It needs no model weights or Tinker account.
 
 ```sh
 uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr smoke --manifest configs/rlvr-smoke.json --workers 2
+uv run --no-project --with-requirements requirements-rlvr.txt python -m pytest rsenv/tests/rlvr rsenv/tests/test_reward.py -q
 ```
 
-This runs four cold-start episodes: equip an axe, gather one log in each of two independent worlds, and end without gathering as a zero-reward control. It asserts the expected outcomes, identical initial fingerprints, distinct world IDs, equipment mutation, and reward replay from saved records. The production rollout closes each browser/server lease. `smoke.json` records phase latency and pass/fail; any failed assertion exits nonzero. Use `--workers 1` to reduce concurrent memory use. The default task is the same one-log fixture when `--manifest` is omitted; `--episodes` does not change this fixed four-episode suite. No model download, GPU, training, or Tinker account is needed.
-
-The smoke checks the real engine, browser login, bridge, action parsing/execution, observations, resets, reward verification, and recording/replay. It does not cover every tool or injected transport failure, independently prove process-leak absence, or test model token masks, hosted optimization, and checkpoint/resume. The focused unit suite covers failure contracts separately. Gameplay remains stochastic despite fixed starting state; a gameplay timeout fails this smoke rather than being silently retried.
+`smoke.json` records outcomes and phase latency; failures exit nonzero. `--workers 1` reduces concurrent memory use. The smoke suite always runs four episodes; `--episodes` applies to collection commands.
 
 ```sh
-uv run --no-project --with-requirements requirements-rlvr.txt python -m pytest rsenv/tests/rlvr -q
 uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr scripted --episodes 4 --workers 2 --output outputs/scripted
 uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr scripted --episodes 2 --fail-policy --output outputs/failing-control
 uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr profile --episodes 4 --output outputs/profile
@@ -38,11 +36,11 @@ uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rl
 uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr replay --records outputs/scripted/episodes.jsonl
 ```
 
-`reset-check` collects fresh episodes, equips the axe, verifies that mutation completed, and checks initial fingerprints. These probes intentionally end without completing the gathering goal. It does not by itself exercise every possible XP/bank mutation or prove engine-wide deterministic replay; scripted gathering runs additionally exercise XP and depleted trees. `profile` measures 1/2/4 workers. Inspect both valid and infrastructure-invalid episode counts; success rates exclude invalid episodes and include Wilson intervals. Costs are explicitly unknown unless billing data is supplied; token counts are recorded.
+`reset-check` equips the axe in each fresh episode and checks initial fingerprints. `profile` measures collection with 1, 2, and 4 workers. Reports separate gameplay outcomes from infrastructure failures and include latency, token counts, and engine memory. Success rates exclude infrastructure-invalid episodes.
 
-## Hosted sampling and GRPO
+## Hosted sampling and training
 
-Set `TINKER_API_KEY` in the environment. The account must have billing access.
+Set `TINKER_API_KEY` for an account with billing access.
 
 ```sh
 uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr evaluate --episodes 4 --workers 2 --output outputs/base
@@ -51,20 +49,18 @@ uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rl
 uv run --no-project --with-requirements requirements-rlvr.txt python eval.py --checkpoint 'tinker://SAMPLER_PATH' --manifest configs/rlvr-heldout.json --episodes 4 --output outputs/heldout
 ```
 
-The default model is `Qwen/Qwen3.5-4B`, LoRA rank 16, learning rate 1e-5, PPO clipping [0.8, 1.2], temperature 1, no top-k/top-p filtering, no thinking, and 512 generated tokens per turn. No KL term or dense reward is used. Support is checked against the account's service capabilities. Hosted sampling and optimization still require a successful live service validation; unit tests are not that validation.
+Defaults are `Qwen/Qwen3.5-4B`, LoRA rank 16, learning rate `1e-5`, PPO clipping `[0.8, 1.2]`, temperature 1, and 512 generated tokens per turn. Thinking, top-k/top-p filtering, and KL penalties are disabled. `eval.py` accepts Tinker sampler checkpoints; the legacy local-checkpoint interface has been replaced.
 
-Every group shares a task, reset fingerprint, and policy checkpoint. Any infrastructure-invalid member rejects the entire group, with at most three full collection attempts. Malformed tools, final answers before success, and exhausted gameplay budgets remain ordinary zero-reward outcomes. Zero-variance groups skip optimization; twenty consecutive such groups stop training. Do not fabricate reward variation to force an update.
+Each group shares a task, reset fingerprint, and policy checkpoint. An infrastructure-invalid member rejects the group, with up to three collection attempts. Valid episodes that end before success receive zero reward. Zero-variance groups skip optimization; twenty consecutive such groups stop training. See [reward and weighting](reward_function_best_practices.md) for the equations and masks.
 
 ## Evidence and recovery
 
-The verifier requires newly acquired canonical log IDs, matching woodcutting XP, a real tree target, fresh correlated observations, and retained inventory. It rechecks the reset receipt. Reset administration and the private authoritative state endpoint are unavailable to policy tools. Each completed action is cancelled before the next model decision. Known unsuccessful actions return failure; uncertain side effects poison the episode.
+The verifier checks new log IDs, matching woodcutting XP, a tree target, observation order, and retained inventory. Each action is cancelled before the next decision. Unknown action outcomes invalidate the episode. Policy tools cannot access fixture administration.
 
-Task seeds and sampling seeds are recorded. Gameplay RNG is uncontrolled: exact initial fixtures do not imply deterministic trajectories. The held-out manifest varies quantity only; it is a small evaluation probe, not evidence of broad task generalization.
+Records include task and sampling seeds. Starting fixtures are reproducible; gameplay RNG remains uncontrolled. The held-out manifest varies log quantity only.
 
-Samples are recorded before execution, and transitions/episodes are appended with fsync. Training uses each turn's original prompt tokens, generated tokens, and behavior log-probabilities. Prompt/observation positions have zero advantage; trajectory weights normalize for generated length. Earlier assistant messages occurring in later prompts are masked there.
+Samples are saved before action execution. Each record append is flushed and synced to disk. Replay checks reward decisions and training-conversion hashes using the recorded prompts, generated tokens, and behavior log-probabilities.
 
-The advantage normalization accounts for Tinker's summed token loss; see its [PPO loss contract](https://tinker-docs.thinkingmachines.ai/tinker/losses/ppo/). Offline replay checks recorded training conversion hashes as well as reward decisions.
+`checkpoint.json` stores the committed optimizer and sampler paths. An update is committed after optimizer-state saving and sampler refresh succeed. `pending-update.json` records an interrupted update; resume forks from the last committed optimizer state.
 
-`checkpoint.json` records the committed optimizer checkpoint separately from the sampler checkpoint. `pending-update.json` identifies an uncertain remote branch. Resume forks from the last committed optimizer state and abandons that branch; it never retries the unknown optimizer operation on the same trainer. New collection uses freshly exported sampling weights after each update.
-
-See [local validation results](live-rlvr-validation.md) for the completed 100-cycle equipment-reset soak and 1/2/4-worker gathering runs. Remaining acceptance work includes clean-machine provisioning, the broader reset fault/mutation matrix, browser/gateway resource accounting, and an actual hosted sampling/update/resume run. SFT and broader task curricula follow the verified learning loop.
+[Validation results](live-rlvr-validation.md) cover live gathering, equipment resets, replay, and cancellation cleanup. Hosted sampling/update/resume remains unvalidated after a billing error. Clean-machine setup, broader reset mutations, and exhaustive transport failures remain open checks.

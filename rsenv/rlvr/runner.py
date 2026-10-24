@@ -1,4 +1,4 @@
-"""Shared scripted, evaluation and training collection; no implicit fake backend."""
+"""Collect live episodes and train from verified groups."""
 
 from __future__ import annotations
 

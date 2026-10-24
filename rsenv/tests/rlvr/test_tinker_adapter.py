@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import math
 import threading
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -8,17 +11,20 @@ from rsenv.rlvr.contracts import InfrastructureError, TaskSpec
 from rsenv.rlvr.learning import TrainingExample
 from rsenv.rlvr.tinker_backend import TinkerBackend, TinkerPolicy, bounded_call
 
+if TYPE_CHECKING:
+    from tinker.types import AdamParams, Datum, ModelInput, SamplingParams
+
 
 class Future:
-    def __init__(self, value):
+    def __init__(self, value: SimpleNamespace) -> None:
         self.value = value
 
-    def result(self, timeout):
+    def result(self, timeout: float) -> SimpleNamespace:
         assert timeout > 0
         return self.value
 
 
-def test_sampling_preserves_tool_tokens_and_behavior_probabilities():
+def test_sampling_preserves_tool_tokens_and_behavior_probabilities() -> None:
     pytest.importorskip("tinker")
 
     class Tokenizer:
@@ -26,17 +32,17 @@ def test_sampling_preserves_tool_tokens_and_behavior_probabilities():
         eos_token_id = 99
         chat_template = "test-template"
 
-        def apply_chat_template(self, messages, **kwargs):
+        def apply_chat_template(self, messages: list[dict[str, str]], **kwargs: object) -> list[int]:
             assert kwargs["enable_thinking"] is False and kwargs["tools"]
             assert kwargs["return_dict"] is False
             return [1, 2, 3]
 
-        def decode(self, tokens, skip_special_tokens):
+        def decode(self, tokens: list[int], skip_special_tokens: bool) -> str:
             assert tokens == [4, 5] and not skip_special_tokens
             return '<tool_call>{"name":"chopTree","arguments":{}}</tool_call>'
 
     class Sampler:
-        def sample(self, model_input, num_samples, sampling_params):
+        def sample(self, model_input: ModelInput, num_samples: int, sampling_params: SamplingParams) -> Future:
             assert num_samples == 1 and sampling_params.temperature == 1
             return Future(
                 SimpleNamespace(
@@ -49,22 +55,22 @@ def test_sampling_preserves_tool_tokens_and_behavior_probabilities():
     assert turn.logprobs == (-1, -2, -3) and "<tool_call>" in turn.text
 
 
-def test_optimizer_payload_and_nonfinite_guard():
+def test_optimizer_payload_and_nonfinite_guard() -> None:
     pytest.importorskip("tinker")
 
     class Trainer:
-        def __init__(self):
+        def __init__(self) -> None:
             self.loss = 1.0
             self.steps = 0
 
-        def forward_backward(self, data, loss_fn, loss_fn_config):
+        def forward_backward(self, data: list[Datum], loss_fn: str, loss_fn_config: dict[str, float]) -> Future:
             assert loss_fn == "ppo"
             assert loss_fn_config == {"clip_low_threshold": 0.8, "clip_high_threshold": 1.2}
             assert list(data[0].loss_fn_inputs["advantages"].data) == [0.0, 0.5]
             assert list(data[0].loss_fn_inputs["logprobs"].data) == [0.0, -1.0]
             return Future(SimpleNamespace(metrics={"loss:sum": self.loss}, loss_fn_outputs=[]))
 
-        def optim_step(self, params):
+        def optim_step(self, params: AdamParams) -> Future:
             assert params.learning_rate == 1e-5
             self.steps += 1
             return Future(SimpleNamespace(metrics=None))
@@ -79,7 +85,7 @@ def test_optimizer_payload_and_nonfinite_guard():
     assert backend.trainer.steps == 1
 
 
-def test_setup_deadline_bounds_paused_sdk():
+def test_setup_deadline_bounds_paused_sdk() -> None:
     release = threading.Event()
     try:
         with pytest.raises(InfrastructureError, match="tinker_setup_deadline"):

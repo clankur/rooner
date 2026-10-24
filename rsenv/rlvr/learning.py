@@ -1,4 +1,4 @@
-"""Backend-neutral GRPO conversion with explicit trajectory weighting."""
+"""Convert verified episodes to masked, equally weighted GRPO examples."""
 
 from __future__ import annotations
 
@@ -10,6 +10,13 @@ from rsenv.rlvr.contracts import EpisodeResult, InfrastructureError
 
 @dataclass(frozen=True)
 class TrainingExample:
+    """Aligned next-token arrays of length prompt_tokens + output_tokens - 1.
+
+    Log-probabilities are natural logs. Prompt targets have zero advantage;
+    generated targets share the episode advantage divided by its token count
+    and the group size. Tinker sums these weighted token losses.
+    """
+
     input_ids: tuple[int, ...]
     targets: tuple[int, ...]
     behavior_logprobs: tuple[float, ...]
@@ -41,20 +48,22 @@ def build_examples(episodes: list[EpisodeResult], group_size: int) -> list[Train
         ):
             raise InfrastructureError("unverified_group_reward")
     rewards = [float(e.reward) for e in episodes]
-    mean = sum(rewards) / group_size
-    variance = sum((r - mean) ** 2 for r in rewards) / group_size
-    if not math.isfinite(variance):
+    mean_reward = sum(rewards) / group_size
+    reward_variance = sum((reward - mean_reward) ** 2 for reward in rewards) / group_size
+    if not math.isfinite(reward_variance):
         raise InfrastructureError("nonfinite_rewards")
+    reward_std = math.sqrt(reward_variance)
     # Validate records even for zero-signal groups, so corruption cannot hide in skipped batches.
     examples: list[TrainingExample] = []
     renderers = {t.turn.renderer for e in episodes for t in e.transitions}
     if len(renderers) != 1:
         raise InfrastructureError("mixed_renderers")
     for episode, reward in zip(episodes, rewards, strict=True):
-        tokens = sum(len(t.turn.output_ids) for t in episode.transitions)
-        if not tokens:
+        generated_tokens = sum(len(transition.turn.output_ids) for transition in episode.transitions)
+        if not generated_tokens:
             raise InfrastructureError("no_sampled_tokens")
-        advantage = (reward - mean) / (math.sqrt(variance) + 1e-8)
+        advantage = (reward - mean_reward) / (reward_std + 1e-8)
+        per_token_advantage = advantage / (generated_tokens * group_size)
         for transition in episode.transitions:
             turn = transition.turn
             if (
@@ -68,14 +77,15 @@ def build_examples(episodes: list[EpisodeResult], group_size: int) -> list[Train
                 raise InfrastructureError("invalid_sampled_turn")
             if not turn.output_ids:
                 continue
-            full = turn.prompt_ids + turn.output_ids
-            prefix = len(turn.prompt_ids) - 1
+            sequence_ids = turn.prompt_ids + turn.output_ids
+            prompt_targets = len(turn.prompt_ids) - 1
+            masked_prefix = (0.0,) * prompt_targets
             examples.append(
                 TrainingExample(
-                    input_ids=full[:-1],
-                    targets=full[1:],
-                    behavior_logprobs=(0.0,) * prefix + turn.logprobs,
-                    advantages=(0.0,) * prefix + (advantage / (tokens * group_size),) * len(turn.output_ids),
+                    input_ids=sequence_ids[:-1],
+                    targets=sequence_ids[1:],
+                    behavior_logprobs=masked_prefix + turn.logprobs,
+                    advantages=masked_prefix + (per_token_advantage,) * len(turn.output_ids),
                 )
             )
-    return examples if variance > 0 else []
+    return examples if reward_variance > 0 else []

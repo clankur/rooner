@@ -100,12 +100,19 @@ quarto render docs
 
 ### Tests
 
-There is no test suite. The local test config is the smoke test.
+Run verifier, transport, training-conversion, and legacy reward tests without model weights:
+
+```
+uv run --no-project --with-requirements requirements-rlvr.txt python -m pytest rsenv/tests/rlvr rsenv/tests/test_reward.py -q
+```
+
+For the real-game smoke, follow `docs/live-rlvr.md`. Hosted training requires Tinker billing access.
 
 ## Architecture
 
 - `train.py` — Model loading (torchao int4), GRPO algorithm, training loop, wandb logging, runq remote execution, Hydra entrypoint. Readable linearly.
-- `rs_env.py` — GameState, game knowledge, heuristic simulator, trajectory rollout (plan-then-execute with tool calls), reward computation.
+- `rsenv/` — Game state, tool parsing, simulator and live clients, trajectory rollout, and shaped rewards.
+- `rsenv/rlvr/` — Isolated live episodes, task verification, GRPO example conversion, Tinker sampling/training, and checkpoint records.
 - `configs/` — Hydra YAML configs. `base.yaml` is the schema; other configs inherit and override model/hardware settings.
 
 ## Remote infrastructure

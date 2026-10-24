@@ -48,19 +48,19 @@ The bridge auto-launches a browser for the bot client and waits for it to enter 
 ## Running tests
 
 ```bash
-# Unit test (SimClient, no server needed)
-uv run pytest tests/ -k sim -v
+# Verifier, transport, training-conversion, and reward tests
+uv run --no-project --with-requirements requirements-rlvr.txt python -m pytest rsenv/tests/rlvr rsenv/tests/test_reward.py -q
 
 # E2E test (BridgeClient, needs running game server)
 cd rsenv/bridge && ./start-server.sh && cd ../..
-uv run pytest tests/ -v -s --tb=long
+uv run pytest rsenv/tests/test_rollout.py -v -s --tb=long
 ```
 
 ## Training
 
 ```bash
-# Local CPU smoke test (tiny model, verifies pipeline)
-RUNQ_EXPERIMENT_ID=local uv run python -m train --config-name=smoke_test ++paths.model_name=smoke_000
+# Real-game smoke (see docs/live-rlvr.md for runtime setup)
+uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr smoke --workers 2
 
 # Submit to GPU via runq
 uv run python -m train --config-name=gpu_4090 ++paths.model_name=run_001
@@ -73,7 +73,7 @@ uv run python -m train --config-name=gpu_4090 ++paths.model_name=run_002 ++grpo.
 
 | Config | Model | VRAM | Notes |
 |--------|-------|------|-------|
-| `smoke_test` | tiny-gpt2 | ~0 | Pipeline check, <1s |
+| `smoke_test` | tiny-gpt2 | ~0 | Legacy config; incompatible with the Qwen-specific trainer |
 | `local_test` | Qwen3.5-0.8B | ~2GB | CPU smoke test |
 | `gpu_4090_0.8b` | Qwen3.5-0.8B | ~4GB | Fast GPU iteration |
 | `gpu_4090` | Qwen3.5-4B | ~18GB | Production |

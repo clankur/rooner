@@ -1,9 +1,10 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from rsenv.rlvr.bridge import VerifiedBridgeClient
-from rsenv.rlvr.contracts import InfrastructureError, TaskSpec
+from rsenv.rlvr.contracts import InfrastructureError, ResetSpec, TaskSpec
 
 
 @pytest.mark.parametrize(
@@ -16,7 +17,7 @@ from rsenv.rlvr.contracts import InfrastructureError, TaskSpec
         {"status": "infra_error"},
     ],
 )
-def test_response_correlation_poisoning(change):
+def test_response_correlation_poisoning(change: dict[str, str | int]) -> None:
     client = VerifiedBridgeClient(SimpleNamespace(world_id="world"), TaskSpec(), "episode")
     response = dict(version=1, episode_id="episode", world_id="world", request_id="1", status="ok")
     client.responses.put({**response, **change})
@@ -27,7 +28,7 @@ def test_response_correlation_poisoning(change):
         client.rpc("state", 0.01)
 
 
-def test_timeout_poisoning_rejects_late_result():
+def test_timeout_poisoning_rejects_late_result() -> None:
     client = VerifiedBridgeClient(SimpleNamespace(world_id="world"), TaskSpec(), "episode")
     with pytest.raises(InfrastructureError):
         client._receive("1", 0.001)
@@ -36,7 +37,7 @@ def test_timeout_poisoning_rejects_late_result():
         client.rpc("state", 0.01)
 
 
-def test_reader_rejects_non_json_and_eof():
+def test_reader_rejects_non_json_and_eof() -> None:
     client = VerifiedBridgeClient(SimpleNamespace(world_id="world"), TaskSpec(), "episode")
     client._process = SimpleNamespace(stdout=iter(["not json\n"]))
     client._reader()
@@ -44,7 +45,7 @@ def test_reader_rejects_non_json_and_eof():
         client._receive("1", 0.01)
 
 
-def test_partial_world_preparation_cleans_up(tmp_path, monkeypatch):
+def test_partial_world_preparation_cleans_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from rsenv.rlvr import worlds
 
     lease = worlds.WorldLease(tmp_path)
@@ -52,7 +53,7 @@ def test_partial_world_preparation_cleans_up(tmp_path, monkeypatch):
     monkeypatch.setattr(worlds, "doctor", lambda sdk: {"ready": True})
     monkeypatch.setattr(lease.processes, "close", lambda: closed.append(True))
 
-    def fail(spec):
+    def fail(spec: ResetSpec) -> Path:
         raise InfrastructureError("partial_reset")
 
     monkeypatch.setattr(lease, "_prepare", fail)
@@ -61,7 +62,7 @@ def test_partial_world_preparation_cleans_up(tmp_path, monkeypatch):
     assert closed == [True] and not lease._acquired
 
 
-def test_engine_patch_rejects_ambiguous_source(tmp_path):
+def test_engine_patch_rejects_ambiguous_source(tmp_path: Path) -> None:
     from rsenv.rlvr.worlds import replace_once
 
     source = tmp_path / "engine.ts"
@@ -71,7 +72,7 @@ def test_engine_patch_rejects_ambiguous_source(tmp_path):
     assert source.read_text() == "target target"
 
 
-def test_missing_browser_fails_before_world_preparation(tmp_path, monkeypatch):
+def test_missing_browser_fails_before_world_preparation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from rsenv.rlvr import worlds
 
     lease = worlds.WorldLease(tmp_path)
