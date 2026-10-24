@@ -24,4 +24,4 @@ done
 (cd "$SDK_DIR/server/engine" && bun run build)
 (cd "$SDK_DIR/server/webclient" && bun run build:dev)
 (cd "$BRIDGE_DIR" && bun x puppeteer browsers install chrome)
-echo "Runtime prepared. Run python -m rsenv.rlvr doctor, then a scripted episode."
+echo "Runtime prepared. Run uv run python -m rsenv.rlvr doctor from the repository root, then a scripted episode."

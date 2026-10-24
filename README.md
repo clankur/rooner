@@ -1,117 +1,47 @@
 # rooner
 
-GRPO-trained LLM agent for RuneScape on the [LostCity/2004scape](https://2004.lostcity.rs/) server.
-
-The model plans then executes: it generates a high-level strategy, then drives action-by-action execution using tool calls, observing game state between actions. Trained with [GRPO](https://arxiv.org/abs/2402.03300) (Group Relative Policy Optimization) — no critic network, no reward model.
-
-The live goal-following RLVR implementation is in `rsenv/rlvr`: isolated real worlds, task-specific binary verification, recorded token trajectories, and hosted Tinker sampling/training. See [Live RLVR setup and operation](docs/live-rlvr.md). The local Hydra trainer and shared-server setup below are legacy paths.
-
-## Prerequisites
-
-- Python >= 3.11, [uv](https://docs.astral.sh/uv/)
-- [Bun](https://bun.sh/) (for the rs-sdk game bridge)
+A RuneScape RLVR experiment using the [LostCity/2004scape](https://2004.lostcity.rs/) game engine and hosted Tinker sampling and training. The policy follows a task goal through tool calls. Each episode runs in a fresh world, and the verifier checks game-state evidence before awarding a binary reward.
 
 ## Setup
 
-```bash
-# Install Python deps (CPU for local dev, GPU for training)
-uv sync --extra cpu    # or: uv sync --extra gpu
+Install Python 3.11+, [uv](https://docs.astral.sh/uv/), and [Bun 1.3.14](https://bun.sh/). From the repository root:
 
-# Set up the game bridge (clones rs-sdk, installs deps, creates bot accounts)
-cd rsenv/bridge
-./setup.sh
+```sh
+uv sync
+bash rsenv/bridge/rlvr/setup.sh
+uv run python -m rsenv.rlvr doctor
 ```
 
-Setup creates two bot accounts:
-- **grpobot1** — the GRPO training agent
-- **monitor1** — observer account (log in via the web client to watch)
+The setup script installs the pinned game SDK, assets, gateway, web client, and browser. Each episode starts and stops its own game processes.
 
-## Running the game server
+## Validate the environment
 
-The LostCity game server runs locally via [rs-sdk](https://github.com/MaxBittker/rs-sdk). Three components: game engine, web client, and gateway.
-
-```bash
-# Start all three in background
-cd rsenv/bridge
-./start-server.sh
-
-# Gateway at ws://localhost:7780
-# Game client at http://localhost:8888/rs2.cgi (log in as monitor1 to watch)
-# Stop with:
-./stop-server.sh
+```sh
+uv run python -m pytest rsenv/tests -q
+uv run python -m rsenv.rlvr smoke --manifest configs/rlvr-smoke.json --workers 2
 ```
 
-Logs are in `rsenv/bridge/logs/`. To adjust game speed, edit `TICK_RATE` in `rsenv/bridge/rs-sdk/server/engine/.env` (default 600ms, lower = faster).
+The smoke runs four episodes: equip an axe, gather a log in each of two worlds, and finish without gathering as a zero-reward control. It checks resets, rewards, and replay of recorded evidence. It needs no model weights or Tinker account.
 
-The bridge auto-launches a browser for the bot client and waits for it to enter the game world. Credentials are loaded from `rsenv/bridge/rs-sdk/bots/grpobot1/bot.env`.
+## Train and evaluate
 
-## Running tests
+Set `TINKER_API_KEY` for an account with billing access.
 
-```bash
-# Verifier, transport, training-conversion, and reward tests
-uv run --no-project --with-requirements requirements-rlvr.txt python -m pytest rsenv/tests/rlvr rsenv/tests/test_reward.py -q
-
-# E2E test (BridgeClient, needs running game server)
-cd rsenv/bridge && ./start-server.sh && cd ../..
-uv run pytest rsenv/tests/test_rollout.py -v -s --tb=long
+```sh
+uv run python -m rsenv.rlvr train --manifest configs/rlvr-train.json --workers 2 --group-size 4 --iterations 25 --output outputs/train
+uv run python -m rsenv.rlvr train --resume outputs/train/checkpoint.json --iterations 50
+uv run python -m rsenv.rlvr evaluate --checkpoint 'tinker://SAMPLER_PATH' --manifest configs/rlvr-heldout.json --episodes 10
 ```
 
-## Training
+Training uses verified episode groups, masked token advantages, and equal trajectory weights. Optimizer state and sampler weights are checkpointed after each update. Hosted learning remains unvalidated pending Tinker billing access.
 
-```bash
-# Real-game smoke (see docs/live-rlvr.md for runtime setup)
-uv run --no-project --with-requirements requirements-rlvr.txt python -m rsenv.rlvr smoke --workers 2
+## Code
 
-# Submit to GPU via runq
-uv run python -m train --config-name=gpu_4090 ++paths.model_name=run_001
+- `rsenv/rlvr/contracts.py`, `tasks.py`: task fixtures, episode records, and reward verification.
+- `rsenv/rlvr/worlds.py`, `bridge.py`, `rsenv/bridge/rlvr/`: world lifecycle and game execution.
+- `rsenv/tools.py`, `tool_parser.py`, `rsenv/rlvr/rollout.py`: tool schemas, parsing, and the episode loop.
+- `rsenv/rlvr/learning.py`, `tinker_backend.py`, `runner.py`: GRPO examples, service calls, and training.
+- `rsenv/rlvr/records.py`, `cli.py`: persisted evidence, replay, and commands.
+- `configs/rlvr-*.json`: smoke, training, and held-out task manifests.
 
-# Hydra overrides
-uv run python -m train --config-name=gpu_4090 ++paths.model_name=run_002 ++grpo.learning_rate=3e-5
-```
-
-### Configs
-
-| Config | Model | VRAM | Notes |
-|--------|-------|------|-------|
-| `smoke_test` | tiny-gpt2 | ~0 | Legacy config; incompatible with the Qwen-specific trainer |
-| `local_test` | Qwen3.5-0.8B | ~2GB | CPU smoke test |
-| `gpu_4090_0.8b` | Qwen3.5-0.8B | ~4GB | Fast GPU iteration |
-| `gpu_4090` | Qwen3.5-4B | ~18GB | Production |
-| `gpu_a100_8b` | Qwen3.5-9B | ~36GB | Needs A100 80GB |
-
-## Evaluation
-
-```bash
-# Evaluate a Tinker sampler checkpoint through the live RLVR runner
-uv run --no-project --with-requirements requirements-rlvr.txt python eval.py --checkpoint 'tinker://SAMPLER_PATH' --episodes 10
-
-# Frozen base policy, greedy decoding
-uv run --no-project --with-requirements requirements-rlvr.txt python eval.py --episodes 10 --greedy
-```
-
-## Architecture
-
-```
-train.py              # GRPO training loop, model loading, loss computation
-eval.py               # Evaluate checkpoints, print trajectories
-rsenv/                # Game environment package (black box)
-  __init__.py          # Public API
-  state.py             # GameState, Trajectory, XP mechanics
-  tools.py             # Pydantic tool models, schema generation, parsing
-  client.py            # RSClient ABC → SimClient (offline) / BridgeClient (live)
-  env.py               # Rollout, prompt formatting, prompt bank
-  bridge/              # TypeScript bridge to rs-sdk
-    executor.ts         # JSON-over-stdin/stdout protocol
-    start-server.sh     # Start local game server
-    stop-server.sh      # Stop local game server
-    setup.sh            # Clone rs-sdk, install deps, create bot
-  prompts/
-    system.md           # System prompt (loaded at runtime)
-configs/               # Hydra YAML configs
-```
-
-## Infrastructure
-
-- **runq** — Self-hosted experiment queue ([github.com/clankur/runq](https://github.com/clankur/runq))
-- **wandb** — Metrics at [wandb.ai/clankur-personal/pooner](https://wandb.ai/clankur-personal/pooner)
-- **fractal** — GPU box (RTX 4090), SSH alias `fractal`
+See [setup and operation](docs/live-rlvr.md), [reward and weighting](docs/reward_function_best_practices.md), and [validation results](docs/live-rlvr-validation.md).

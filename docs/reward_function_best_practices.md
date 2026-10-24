@@ -1,6 +1,6 @@
 # Reward and GRPO weighting
 
-The live RLVR runner uses task-specific binary rewards. The legacy PyTorch trainer uses shaped rewards. Their implementations are separate.
+The runner uses task-specific binary rewards and group-normalized advantages.
 
 ## Live task reward
 
@@ -30,19 +30,3 @@ Each turn uses its recorded prompt and generated token IDs. Inputs and targets a
 Tinker's PPO loss sums token contributions with ratio clipping at `[0.8, 1.2]`. Dividing by each episode's generated-token count and the group size gives each episode equal weight. The adapter sends these weights directly; it does not apply another mean reduction.
 
 Zero-variance groups skip optimization. The runner stops after twenty consecutive such groups. Tests check prompt masking and total episode weight for different trajectory lengths and group sizes. Hosted optimizer behavior still requires service validation.
-
-## Legacy shaped reward
-
-[`compute_reward`](../rsenv/env.py) returns the sum of these named components:
-
-| Component | Contribution |
-|---|---|
-| XP | Sum of action XP, divided by the XP multiplier and then by 100 |
-| Level-ups | `2.0` per level gained |
-| Valid actions | `0.1` each when the trajectory gains XP or levels |
-| Invalid actions | `-0.05` each |
-| No actions | `-2.0` when no tool calls execute |
-
-The reward is not clamped or min-max normalized. At the default ten-action budget, silence scores `-2.0`, ten invalid actions score `-0.5`, and ten valid moves without XP or levels score `0.0`. One valid action earning 25 XP without a level-up scores `0.35` at an XP multiplier of one. These outcomes keep movement alone from earning positive reward while making attempts preferable to silence within that budget.
-
-The trainer logs each component alongside the total. When changing the reward, check these boundary cases and the resulting group advantages before running a training experiment.

@@ -25,8 +25,6 @@ class Future:
 
 
 def test_sampling_preserves_tool_tokens_and_behavior_probabilities() -> None:
-    pytest.importorskip("tinker")
-
     class Tokenizer:
         name_or_path = "test"
         eos_token_id = 99
@@ -56,8 +54,6 @@ def test_sampling_preserves_tool_tokens_and_behavior_probabilities() -> None:
 
 
 def test_optimizer_payload_and_nonfinite_guard() -> None:
-    pytest.importorskip("tinker")
-
     class Trainer:
         def __init__(self) -> None:
             self.loss = 1.0

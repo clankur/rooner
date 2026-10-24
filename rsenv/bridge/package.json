@@ -2,9 +2,6 @@
   "name": "pooner-bridge",
   "version": "0.1.0",
   "type": "module",
-  "scripts": {
-    "start": "bun run executor.ts"
-  },
   "dependencies": {
     "puppeteer": "24.43.1"
   },

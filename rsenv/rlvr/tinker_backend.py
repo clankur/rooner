@@ -1,4 +1,4 @@
-"""Tinker sampling and optimization; optional dependency, imported only on demand."""
+"""Tinker sampling and optimization."""
 
 from __future__ import annotations
 

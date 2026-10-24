@@ -49,7 +49,8 @@ def parse_action(turn: SampledTurn, task: TaskSpec) -> ParsedAction:
         return ParsedAction(status="final", reason="model_final_answer")
     if len(calls) != 1 or turn.text.count("<tool_call>") != 1:
         return ParsedAction(status="invalid", reason="one_tool_call_required")
-    name, args = calls[0]
+    name = calls[0].name
+    args = calls[0].arguments
     if not isinstance(name, str) or name not in task.allowed_tools:
         return ParsedAction(status="invalid", reason="unsupported_tool")
     if not isinstance(args, dict):
@@ -59,12 +60,6 @@ def parse_action(turn: SampledTurn, task: TaskSpec) -> ParsedAction:
         if set(args) - model.model_fields.keys():
             raise ValueError("extra arguments")
         arguments = model.model_validate(args).model_dump(mode="json", exclude_none=True)
-        if name == "chopTree" and arguments.get("tree_type", "Tree") != "Tree":
-            raise ValueError("unsupported tree")
-        if name == "equipItem" and arguments["item"] != "Bronze axe":
-            raise ValueError("unsupported equipment")
-        if name == "walkTo" and not all(0 <= arguments[k] < 16384 for k in ("x", "z")):
-            raise ValueError("coordinates outside world")
     except (ValidationError, ValueError, TypeError):
         return ParsedAction(status="invalid", reason="invalid_arguments")
     return ParsedAction(status="action", name=name, arguments=arguments)

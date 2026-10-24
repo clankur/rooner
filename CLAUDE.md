@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-rooner ([clankur/rooner](https://github.com/clankur/rooner)) is a PyTorch GRPO training codebase for teaching a small LLM (Qwen3 / Gemma 4) to play RuneScape on the LostCity/2004scape server. The model plans then executes: it generates a high-level strategy, then drives action-by-action execution using tool calls, observing game state between actions. The defining design value is **explicitness**: the algorithm, state transitions, and computational costs should be visible in source. Minimize the conceptual machinery needed to understand and change the program.
+rooner ([clankur/rooner](https://github.com/clankur/rooner)) is a GRPO training experiment for teaching an LLM to play RuneScape on the LostCity/2004scape server. The policy follows task goals through tool calls in isolated live worlds. Game-state evidence determines rewards; Tinker provides hosted sampling and optimization. The defining design value is **explicitness**: the algorithm, state transitions, and computational costs should be visible in source. Minimize the conceptual machinery needed to understand and change the program.
 
 ## Code Standards
 
@@ -54,69 +54,46 @@ When changing numerical behavior, validate the relevant mathematical property wi
 
 ## Common commands
 
-### Install
+Requires Python >= 3.11, uv, and Bun 1.3.14. Run from the repository root.
 
-Requires Python >= 3.11. CPU dev:
-
-```
-uv sync --extra cpu
-```
-
-For GPU use `uv sync --extra gpu`.
-
-### Local CPU smoke test
+### Install and check the game runtime
 
 ```
-RUNQ_EXPERIMENT_ID=local uv run python -m train --config-name=local_test ++paths.model_name=smoke_000
+uv sync
+bash rsenv/bridge/rlvr/setup.sh
+uv run python -m rsenv.rlvr doctor
+uv run python -m rsenv.rlvr smoke --manifest configs/rlvr-smoke.json --workers 2
 ```
 
-### Run on remote GPU (fractal)
+### Train
+
+Set `TINKER_API_KEY` for an account with billing access.
 
 ```
-uv run python -m train --config-name=gpu_4090 ++paths.model_name=my_experiment
+uv run python -m rsenv.rlvr train --manifest configs/rlvr-train.json --workers 2 --group-size 4 --iterations 25 --output outputs/train
 ```
 
-Without `RUNQ_EXPERIMENT_ID`, this auto-submits to the runq queue via `execute_remotely()`.
-
-### Hydra overrides
+### Tests, lint, and format
 
 ```
-uv run python -m train --config-name=gpu_4090 ++paths.model_name=grpo_001 ++grpo.learning_rate=3e-5
-```
-
-### Lint and format
-
-```
+uv run python -m pytest rsenv/tests -q
 uvx ruff check
 uvx ruff format
 ```
 
-### Docs (Quarto)
+### Experiment reports (Quarto)
 
 ```
-quarto preview docs
-quarto render docs
+uv run --group docs quarto preview docs
+uv run --group docs quarto render docs
 ```
-
-### Tests
-
-Run verifier, transport, training-conversion, and legacy reward tests without model weights:
-
-```
-uv run --no-project --with-requirements requirements-rlvr.txt python -m pytest rsenv/tests/rlvr rsenv/tests/test_reward.py -q
-```
-
-For the real-game smoke, follow `docs/live-rlvr.md`. Hosted training requires Tinker billing access.
 
 ## Architecture
 
-- `train.py` — Model loading (torchao int4), GRPO algorithm, training loop, wandb logging, runq remote execution, Hydra entrypoint. Readable linearly.
-- `rsenv/` — Game state, tool parsing, simulator and live clients, trajectory rollout, and shaped rewards.
-- `rsenv/rlvr/` — Isolated live episodes, task verification, GRPO example conversion, Tinker sampling/training, and checkpoint records.
-- `configs/` — Hydra YAML configs. `base.yaml` is the schema; other configs inherit and override model/hardware settings.
-
-## Remote infrastructure
-
-- **runq** — Self-hosted experiment queue at https://github.com/clankur/runq. Server runs on fractal (192.168.4.85:8080).
-- **fractal** — GPU box (RTX 4090, Ubuntu 22.04, driver 570, CUDA 12.8). SSH alias `fractal`, user `clankur`.
-- **wandb** — Metrics logged to `clankur-personal/pooner` project.
+- `rsenv/rlvr/contracts.py`, `tasks.py` — Task specifications, episode evidence, and reward verification.
+- `rsenv/rlvr/worlds.py`, `bridge.py` — Private game worlds and bounded action transport.
+- `rsenv/bridge/rlvr/` — Pinned runtime setup, authoritative engine observations, and tool execution.
+- `rsenv/tools.py`, `tool_parser.py`, `rsenv/rlvr/rollout.py` — Tool schemas, parsing, and episode control flow.
+- `rsenv/rlvr/learning.py`, `tinker_backend.py`, `runner.py` — Token masks, GRPO weighting, service calls, and checkpointed training.
+- `rsenv/rlvr/records.py`, `cli.py` — Durable records, replay, and command entry point.
+- `configs/rlvr-*.json` — Smoke, training, and held-out task manifests.

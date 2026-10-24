@@ -40,3 +40,11 @@ See [Live RLVR setup and operation](live-rlvr.md) for commands and contracts.
 - The earlier run used a temporary Puppeteer cache. Running without that override exposed a missing Chrome installation in the default cache. Installing the pinned Chrome there fixed the exact command above. Browser executable availability is now checked before world creation, with an actionable installation message.
 - The focused suite now has 43 passing tests, including a regression check that a missing browser prevents world preparation. Focused lint and whitespace checks pass.
 - This smoke exercises the real environment without a model or optimizer. It does not validate hosted learning or exhaustive tool and transport-failure coverage.
+
+## Single-flow validation — 2026-10-24
+
+- `uv sync --locked` installed the project environment without Torch, Hydra, runq, or wandb.
+- `uv run --locked python -m pytest rsenv/tests -q`: 51 passed, covering the live verifier, parser, transport, GRPO weighting, and Tinker adapter.
+- The four-episode smoke passed in **42.97 seconds** with two successful gathers, the expected zero-reward controls, matching reset fingerprints, distinct worlds, four replayed episodes, and no infrastructure failures. Artifacts are in `outputs/pr9-live-only-smoke/`.
+- The pinned browser dependencies installed with `bun install --frozen-lockfile`. Python lint/format checks, bridge bundling, setup-script syntax, and whitespace checks passed.
+- This run reused the installed pinned game SDK. Clean-machine provisioning and hosted learning remain unvalidated.
