@@ -4,6 +4,8 @@ GRPO-trained LLM agent for RuneScape on the [LostCity/2004scape](https://2004.lo
 
 The model plans then executes: it generates a high-level strategy, then drives action-by-action execution using tool calls, observing game state between actions. Trained with [GRPO](https://arxiv.org/abs/2402.03300) (Group Relative Policy Optimization) — no critic network, no reward model.
 
+The live goal-following RLVR implementation is in `rsenv/rlvr`: isolated real worlds, task-specific binary verification, recorded token trajectories, and hosted Tinker sampling/training. See [Live RLVR setup and operation](docs/live-rlvr.md). The local Hydra trainer and shared-server setup below are legacy paths.
+
 ## Prerequisites
 
 - Python >= 3.11, [uv](https://docs.astral.sh/uv/)
@@ -80,11 +82,11 @@ uv run python -m train --config-name=gpu_4090 ++paths.model_name=run_002 ++grpo.
 ## Evaluation
 
 ```bash
-# Evaluate a checkpoint (reads model name from config.json next to checkpoint)
-uv run python eval.py --checkpoint /tmp/run_001/checkpoint_200.pt --num-episodes 10
+# Evaluate a Tinker sampler checkpoint through the live RLVR runner
+.venv/bin/python eval.py --checkpoint 'tinker://SAMPLER_PATH' --episodes 10
 
-# Greedy decoding, quiet mode
-uv run python eval.py --checkpoint /tmp/run_001/checkpoint_final.pt --temperature 0.1 --quiet
+# Frozen base policy, greedy decoding
+.venv/bin/python eval.py --episodes 10 --greedy
 ```
 
 ## Architecture

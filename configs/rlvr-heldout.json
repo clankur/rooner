@@ -1,0 +1,9 @@
+[
+  {
+    "id": "gather_logs_7/heldout-v1",
+    "quantity": 7,
+    "max_turns": 25,
+    "episode_seconds": 300,
+    "action_seconds": 30
+  }
+]

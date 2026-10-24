@@ -1,0 +1,9 @@
+[
+  {
+    "id": "gather_logs_1/smoke-v1",
+    "quantity": 1,
+    "max_turns": 6,
+    "episode_seconds": 120,
+    "action_seconds": 30
+  }
+]

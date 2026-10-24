@@ -1,0 +1,87 @@
+import math
+import threading
+from types import SimpleNamespace
+
+import pytest
+
+from rsenv.rlvr.contracts import InfrastructureError, TaskSpec
+from rsenv.rlvr.learning import TrainingExample
+from rsenv.rlvr.tinker_backend import TinkerBackend, TinkerPolicy, bounded_call
+
+
+class Future:
+    def __init__(self, value):
+        self.value = value
+
+    def result(self, timeout):
+        assert timeout > 0
+        return self.value
+
+
+def test_sampling_preserves_tool_tokens_and_behavior_probabilities():
+    pytest.importorskip("tinker")
+
+    class Tokenizer:
+        name_or_path = "test"
+        eos_token_id = 99
+
+        def apply_chat_template(self, messages, **kwargs):
+            assert kwargs["enable_thinking"] is False and kwargs["tools"]
+            assert kwargs["return_dict"] is False
+            return [1, 2, 3]
+
+        def decode(self, tokens, skip_special_tokens):
+            assert tokens == [4, 5] and not skip_special_tokens
+            return '<tool_call>{"name":"chopTree","arguments":{}}</tool_call>'
+
+    class Sampler:
+        def sample(self, model_input, num_samples, sampling_params):
+            assert num_samples == 1 and sampling_params.temperature == 1
+            return Future(
+                SimpleNamespace(
+                    sequences=[SimpleNamespace(tokens=[4, 5, 99], logprobs=[-1, -2, -3], stop_reason="stop")]
+                )
+            )
+
+    turn = TinkerPolicy(Sampler(), Tokenizer(), "version").sample([], TaskSpec(), 42, 10)
+    assert turn.prompt_ids == (1, 2, 3) and turn.output_ids == (4, 5, 99)
+    assert turn.logprobs == (-1, -2, -3) and "<tool_call>" in turn.text
+
+
+def test_optimizer_payload_and_nonfinite_guard():
+    pytest.importorskip("tinker")
+
+    class Trainer:
+        def __init__(self):
+            self.loss = 1.0
+            self.steps = 0
+
+        def forward_backward(self, data, loss_fn, loss_fn_config):
+            assert loss_fn == "ppo"
+            assert loss_fn_config == {"clip_low_threshold": 0.8, "clip_high_threshold": 1.2}
+            assert list(data[0].loss_fn_inputs["advantages"].data) == [0.0, 0.5]
+            assert list(data[0].loss_fn_inputs["logprobs"].data) == [0.0, -1.0]
+            return Future(SimpleNamespace(metrics={"loss:sum": self.loss}))
+
+        def optim_step(self, params):
+            assert params.learning_rate == 1e-5
+            self.steps += 1
+            return Future(None)
+
+    backend = object.__new__(TinkerBackend)
+    backend.trainer = Trainer()
+    batch = [TrainingExample((1, 2), (2, 3), (0.0, -1.0), (0.0, 0.5))]
+    backend.update(batch)
+    backend.trainer.loss = math.nan
+    with pytest.raises(InfrastructureError, match="nonfinite"):
+        backend.update(batch)
+    assert backend.trainer.steps == 1
+
+
+def test_setup_deadline_bounds_paused_sdk():
+    release = threading.Event()
+    try:
+        with pytest.raises(InfrastructureError, match="tinker_setup_deadline"):
+            bounded_call(release.wait, timeout=0.005)
+    finally:
+        release.set()

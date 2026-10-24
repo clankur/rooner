@@ -1,0 +1,5 @@
+# Lightweight hosted-training path; local torch/runq dependencies are unnecessary.
+pydantic==2.13.4
+tinker==0.35.0
+transformers==5.9.0
+pytest==9.0.3

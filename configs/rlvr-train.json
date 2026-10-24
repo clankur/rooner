@@ -1,0 +1,9 @@
+[
+  {
+    "id": "gather_logs_5/v1",
+    "quantity": 5,
+    "max_turns": 20,
+    "episode_seconds": 300,
+    "action_seconds": 30
+  }
+]

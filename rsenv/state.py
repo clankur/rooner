@@ -1,8 +1,12 @@
 """Game state data structures, XP mechanics, and trajectory container."""
 
-from dataclasses import dataclass, field
+from __future__ import annotations
 
-import torch
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import torch
 
 
 def _build_xp_table(max_level: int = 99) -> list[int]:

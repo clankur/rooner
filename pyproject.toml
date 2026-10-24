@@ -19,6 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+rlvr = ["tinker==0.35.0"]
 cpu = ["torch", "torchvision"]
 gpu = ["torch", "torchvision"]
 
