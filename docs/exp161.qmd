@@ -239,4 +239,4 @@ The failure mode is self-reinforcing. Once the model stops producing tool calls,
 
 ---
 
-*This is an open research project training LLMs to play RuneScape via GRPO on the [LostCity/2004scape](https://github.com/2004scape) server using the [rs-sdk](https://github.com/misterhat/rs-sdk). If you're interested in collaborating — compute, ideas, or code — reach out on [GitHub](https://github.com/clankur/pooner) or [Twitter](https://twitter.com/clankur).*
+*This is an open research project training LLMs to play RuneScape via GRPO on the [LostCity/2004scape](https://github.com/2004scape) server using the [rs-sdk](https://github.com/misterhat/rs-sdk). If you're interested in collaborating — compute, ideas, or code — reach out on [GitHub](https://github.com/clankur/rooner) or [Twitter](https://twitter.com/clankur).*
