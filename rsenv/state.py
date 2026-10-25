@@ -168,3 +168,4 @@ class Trajectory:
     num_level_ups: int
     total_gen_tokens: int
     final_state: GameState
+    num_lookups: int = 0

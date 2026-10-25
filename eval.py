@@ -11,7 +11,7 @@ import os
 import sys
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoProcessor, AutoTokenizer, Qwen3_5ForConditionalGeneration
 
 from rsenv import (
     Trajectory,
@@ -25,13 +25,13 @@ def load_checkpoint(
     checkpoint_path: str,
     model_name_or_path: str,
     device: torch.device,
-) -> tuple[AutoModelForCausalLM, AutoTokenizer]:
+) -> tuple[Qwen3_5ForConditionalGeneration, AutoProcessor]:
     """Load model from checkpoint."""
-    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    processor = AutoProcessor.from_pretrained(model_name_or_path)
+    if processor.tokenizer.pad_token is None:
+        processor.tokenizer.pad_token = processor.tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(
+    model = Qwen3_5ForConditionalGeneration.from_pretrained(
         model_name_or_path,
         torch_dtype=torch.bfloat16,
         device_map={"": device} if device.type == "cuda" else None,
@@ -45,7 +45,7 @@ def load_checkpoint(
     step = ckpt.get("step", "?")
     print(f"Loaded checkpoint from step {step}: {checkpoint_path}")
 
-    return model, tokenizer
+    return model, processor
 
 
 def print_trajectory(traj: Trajectory, tokenizer: AutoTokenizer, idx: int) -> None:
@@ -56,6 +56,7 @@ def print_trajectory(traj: Trajectory, tokenizer: AutoTokenizer, idx: int) -> No
     print(f"Trajectory {idx}")
     print(f"{'=' * 80}")
     print(f"Actions: {traj.num_actions} ({traj.num_valid_actions} valid)")
+    print(f"Wiki lookups: {traj.num_lookups}")
     print(f"XP gained: {traj.total_xp:.0f}")
     print(f"Reward: {traj.total_reward:.2f}")
     print("Final state:")
@@ -66,14 +67,16 @@ def print_trajectory(traj: Trajectory, tokenizer: AutoTokenizer, idx: int) -> No
 
 
 def evaluate(
-    model: AutoModelForCausalLM,
-    tokenizer: AutoTokenizer,
+    model: Qwen3_5ForConditionalGeneration,
+    processor: AutoProcessor,
     num_episodes: int,
     max_actions: int,
     max_new_tokens: int,
     temperature: float,
     device: torch.device,
     verbose: bool = True,
+    max_lookups: int = 3,
+    wiki_data_path: str = "",
 ) -> list[dict]:
     """Run evaluation episodes and return metrics."""
     prompt_bank = load_prompt_bank(seed=123)
@@ -83,9 +86,11 @@ def evaluate(
         state = prompt_bank[i % len(prompt_bank)]
         traj = rollout_trajectory(
             model=model,
-            tokenizer=tokenizer,
+            processor=processor,
             initial_state=state,
             max_actions=max_actions,
+            max_lookups=max_lookups,
+            wiki_data_path=wiki_data_path,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             device=device,
@@ -95,6 +100,7 @@ def evaluate(
             "episode": i,
             "num_actions": traj.num_actions,
             "num_valid_actions": traj.num_valid_actions,
+            "num_lookups": traj.num_lookups,
             "total_xp": traj.total_xp,
             "reward": traj.total_reward,
             "validity_rate": traj.num_valid_actions / max(traj.num_actions, 1),
@@ -102,7 +108,7 @@ def evaluate(
         results.append(result)
 
         if verbose:
-            print_trajectory(traj, tokenizer, i)
+            print_trajectory(traj, processor.tokenizer, i)
 
     # Summary
     print(f"\n{'=' * 80}")
@@ -116,6 +122,7 @@ def evaluate(
     print(f"Mean reward:     {sum(rewards) / len(rewards):.2f}  (min={min(rewards):.2f}, max={max(rewards):.2f})")
     print(f"Mean XP gained:  {sum(xps) / len(xps):.1f}  (min={min(xps):.1f}, max={max(xps):.1f})")
     print(f"Mean actions:    {sum(actions) / len(actions):.1f}  (valid: {sum(valid) / len(valid):.1f})")
+    print(f"Mean lookups:    {sum(r['num_lookups'] for r in results) / len(results):.1f}")
     validity = [r["validity_rate"] for r in results]
     print(f"Validity rate:   {sum(validity) / len(validity):.1%}")
     print(f"{'=' * 80}\n")
@@ -129,6 +136,10 @@ def main() -> None:
     parser.add_argument("--model", default=None, help="Model name/path (reads from config.json if not specified)")
     parser.add_argument("--num-episodes", type=int, default=10, help="Number of evaluation episodes")
     parser.add_argument("--max-actions", type=int, default=20, help="Max actions per trajectory")
+    parser.add_argument(
+        "--max-lookups", type=int, default=3, help="Separate wiki lookup budget (0 disables wikiSearch)"
+    )
+    parser.add_argument("--wiki-data-path", default="", help="rs-sdk checkout root containing wiki/ and learnings/")
     parser.add_argument("--max-new-tokens", type=int, default=256, help="Max tokens per generation turn")
     parser.add_argument("--temperature", type=float, default=0.3, help="Sampling temperature (lower = more greedy)")
     parser.add_argument("--quiet", action="store_true", help="Only print summary, not full trajectories")
@@ -150,14 +161,16 @@ def main() -> None:
             print("No --model specified and no config.json found. Specify --model.", file=sys.stderr)
             sys.exit(1)
 
-    model, tokenizer = load_checkpoint(args.checkpoint, model_name, device)
+    model, processor = load_checkpoint(args.checkpoint, model_name, device)
     model.eval()
 
     results = evaluate(
         model=model,
-        tokenizer=tokenizer,
+        processor=processor,
         num_episodes=args.num_episodes,
         max_actions=args.max_actions,
+        max_lookups=args.max_lookups,
+        wiki_data_path=args.wiki_data_path,
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
         device=device,

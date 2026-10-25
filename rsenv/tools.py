@@ -9,7 +9,7 @@ Single source of truth for tool schemas. Used for:
 import logging
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from rsenv.tool_parser import extract_tool_call, extract_tool_calls
 
@@ -157,6 +157,22 @@ class TalkTo(BaseModel):
     npc_name: str = Field(..., description="Name of the NPC to talk to")
 
 
+class WikiSearch(BaseModel):
+    """Search local rs-sdk wiki and learnings for game facts, requirements, and locations. Uses a lookup, not a game action."""
+
+    query: str = Field(
+        ..., min_length=1, max_length=300, description="Specific item, skill, location, or game question"
+    )
+
+    @field_validator("query")
+    @classmethod
+    def strip_query(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Query must not be blank")
+        return value
+
+
 # ─── Registry ─────────────────────────────────────────────────────────────
 
 TOOL_MODELS: dict[str, type[BaseModel]] = {
@@ -180,9 +196,11 @@ TOOL_MODELS: dict[str, type[BaseModel]] = {
     "fletchLogs": FletchLogs,
     "smithItem": SmithItem,
     "talkTo": TalkTo,
+    "wikiSearch": WikiSearch,
 }
 
 TOOL_NAMES: set[str] = set(TOOL_MODELS.keys())
+GAME_TOOL_NAMES: set[str] = TOOL_NAMES - {"wikiSearch"}
 
 XP_TABLE: dict[str, dict[str, float]] = {
     "chopTree": {"Woodcutting": 25.0},

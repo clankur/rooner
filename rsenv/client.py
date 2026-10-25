@@ -15,7 +15,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from rsenv.state import ActionResult, GameState, GroundItemInfo, InventorySlot, LocInfo, NpcInfo
-from rsenv.tools import ACTION_PREREQUISITES, LEVEL_REQUIREMENTS, TOOL_NAMES, XP_TABLE
+from rsenv.tools import ACTION_PREREQUISITES, GAME_TOOL_NAMES, LEVEL_REQUIREMENTS, XP_TABLE
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class SimClient(RSClient):
         args_dict = args.model_dump(exclude_none=True)
         state = self._state
 
-        if name not in TOOL_NAMES:
+        if name not in GAME_TOOL_NAMES:
             return ActionResult(observation=f"Unknown action: {name}", xp_gained={}, valid=False)
 
         min_level = LEVEL_REQUIREMENTS.get(name, 1)

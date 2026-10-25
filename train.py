@@ -65,6 +65,8 @@ class GRPOConfig:
 @dataclass(frozen=True)
 class EnvConfig:
     max_actions: int = 20
+    max_lookups: int = 3
+    wiki_data_path: str = ""
     use_heuristic_reward: bool = True
     game_data_path: str = ""
     gateway_url: str = "ws://localhost:7780"
@@ -315,6 +317,7 @@ class StepMetrics:
     group_mean_xp: float
     mean_actions: float
     mean_valid_actions: float
+    mean_lookups: float
     mean_level_ups: float
     mean_tokens_per_action: float
     idle_count: int
@@ -426,6 +429,8 @@ def train(config: Config) -> None:
                     processor=processor,
                     initial_state=reset_target,
                     max_actions=config.env.max_actions,
+                    max_lookups=config.env.max_lookups,
+                    wiki_data_path=config.env.wiki_data_path,
                     max_new_tokens=config.model.max_new_tokens,
                     temperature=config.model.temperature,
                     device=device,
@@ -444,6 +449,8 @@ def train(config: Config) -> None:
                     processor=processor,
                     initial_state=state,
                     max_actions=config.env.max_actions,
+                    max_lookups=config.env.max_lookups,
+                    wiki_data_path=config.env.wiki_data_path,
                     max_new_tokens=config.model.max_new_tokens,
                     temperature=config.model.temperature,
                     device=device,
@@ -523,10 +530,9 @@ def train(config: Config) -> None:
             group_mean_xp=sum(t.total_xp for t in trajectories) / len(trajectories),
             mean_actions=total_actions_sum / len(trajectories),
             mean_valid_actions=sum(t.num_valid_actions for t in trajectories) / len(trajectories),
+            mean_lookups=sum(t.num_lookups for t in trajectories) / len(trajectories),
             mean_level_ups=sum(t.num_level_ups for t in trajectories) / len(trajectories),
-            mean_tokens_per_action=(
-                sum(t.total_gen_tokens for t in trajectories) / max(total_actions_sum, 1)
-            ),
+            mean_tokens_per_action=(sum(t.total_gen_tokens for t in trajectories) / max(total_actions_sum, 1)),
             idle_count=sum(1 for t in trajectories if t.total_xp == 0 and t.num_actions > 0),
             policy_loss=sum(epoch_policy) / len(epoch_policy),
             kl_loss=sum(epoch_kl) / len(epoch_kl),
@@ -541,6 +547,7 @@ def train(config: Config) -> None:
                 f"reward={metrics.group_mean_reward:>6.2f} "
                 f"xp={metrics.group_mean_xp:>6.1f} "
                 f"actions={metrics.mean_actions:>4.1f}/{metrics.mean_valid_actions:>4.1f} "
+                f"lookups={metrics.mean_lookups:>3.1f} "
                 f"loss={metrics.total_loss:>8.4f} "
                 f"kl={metrics.kl_loss:>7.4f} "
                 f"lr={metrics.learning_rate:.2e} "
@@ -554,6 +561,7 @@ def train(config: Config) -> None:
                     "group_mean_xp": metrics.group_mean_xp,
                     "mean_actions": metrics.mean_actions,
                     "mean_valid_actions": metrics.mean_valid_actions,
+                    "mean_lookups": metrics.mean_lookups,
                     "mean_level_ups": metrics.mean_level_ups,
                     "mean_tokens_per_action": metrics.mean_tokens_per_action,
                     "idle_count": metrics.idle_count,

@@ -20,6 +20,8 @@ grpo:
 
 env:
   max_actions: 20
+  max_lookups: 3
+  wiki_data_path: ""  # rs-sdk checkout root; defaults to rsenv/bridge/rs-sdk
   use_heuristic_reward: true
   game_data_path: ""
   gateway_url: "ws://localhost:7780"

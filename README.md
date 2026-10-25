@@ -46,6 +46,9 @@ The bridge auto-launches a browser for the bot client and waits for it to enter 
 ## Running tests
 
 ```bash
+# Offline wiki search and rollout-budget tests (no model download or server)
+uv run pytest rsenv/tests/test_wiki.py rsenv/tests/test_wiki_rollout.py -q
+
 # Unit test (SimClient, no server needed)
 uv run pytest tests/ -k sim -v
 
@@ -87,6 +90,42 @@ uv run python eval.py --checkpoint /tmp/run_001/checkpoint_200.pt --num-episodes
 uv run python eval.py --checkpoint /tmp/run_001/checkpoint_final.pt --temperature 0.1 --quiet
 ```
 
+## Wiki lookups
+
+The agent can call `wikiSearch(query)` to search Markdown in the local rs-sdk
+`wiki/` and `learnings/` directories. Each response contains up to three excerpts
+(at most 1,200 characters each), with source paths and the remaining lookup budget.
+Search runs locally with no network requests or additional dependencies.
+Exact page titles and filenames take priority over general BM25 matches. Excerpts
+preserve section headings, table headers, and complete rows. Up to two excerpts
+can come from one source when the second covers additional query terms; overlapping
+body lines are omitted, while headers may repeat so each excerpt is readable.
+
+Episodes default to **three lookups in addition to the game-action budget**.
+Lookups never execute through the game bridge, count as valid/invalid game actions,
+or award XP. Empty results and unavailable-corpus responses still spend a lookup.
+Generated search calls count toward the existing token-efficiency reward; retrieved
+text is masked out of the training loss. Rejected over-budget lookups get an error;
+a cap of `max_actions + max_lookups + 1` generation turns prevents endless retries.
+An episode ends when its game-action budget is spent.
+
+The default corpus is `rsenv/bridge/rs-sdk`, populated by `rsenv/bridge/setup.sh`.
+For simulator-only use, an rs-sdk checkout containing the two Markdown directories
+is sufficient; no running game server is needed. If the corpus is missing, the tool
+returns an explicit unavailable error. To use another checkout or disable lookups:
+
+```bash
+uv run python -m train --config-name=gpu_4090 env.max_lookups=3 env.wiki_data_path=/path/to/rs-sdk
+uv run python -m train --config-name=gpu_4090 env.max_lookups=0
+uv run python eval.py --checkpoint /tmp/run_001/checkpoint_final.pt --max-lookups 3 --wiki-data-path /path/to/rs-sdk
+```
+
+Training logs `mean_lookups`; evaluation reports `num_lookups` per episode.
+Keep the rs-sdk checkout revision fixed across compared runs. The search index is
+cached for the process lifetime; restart after changing corpus files. Learnings can
+describe server-specific XP multipliers or SDK methods, so the agent is instructed
+to use current observations and its available tools when applying results.
+
 ## Architecture
 
 ```
@@ -96,6 +135,7 @@ rsenv/                # Game environment package (black box)
   __init__.py          # Public API
   state.py             # GameState, Trajectory, XP mechanics
   tools.py             # Pydantic tool models, schema generation, parsing
+  wiki.py              # Local wiki/learnings passage search
   client.py            # RSClient ABC → SimClient (offline) / BridgeClient (live)
   env.py               # Rollout, prompt formatting, prompt bank
   bridge/              # TypeScript bridge to rs-sdk
