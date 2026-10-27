@@ -4,18 +4,25 @@ Adapted from vLLM's qwen3_coder tool parser:
 https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8/blob/main/qwen3coder_tool_parser.py
 
 Supports both JSON and Qwen3.5 XML formats inside <tool_call> tags.
-Type coercion is deferred to pydantic validation in tools.py.
+Tool arguments are validated by the rollout before execution.
 """
 
 import json
 import re
+from dataclasses import dataclass
 
 _TOOL_CALL_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
 _FUNC_RE = re.compile(r"<function=(.*?)</function>", re.DOTALL)
 _PARAM_RE = re.compile(r"<parameter=(.*?)(?:</parameter>|(?=<parameter=)|(?=</function>)|$)", re.DOTALL)
 
 
-def _parse_xml_function_call(function_call_str: str) -> tuple[str, dict] | None:
+@dataclass(frozen=True)
+class ToolCall:
+    name: object
+    arguments: object
+
+
+def _parse_xml_function_call(function_call_str: str) -> ToolCall | None:
     end_index = function_call_str.find(">")
     if end_index == -1:
         return None
@@ -35,10 +42,10 @@ def _parse_xml_function_call(function_call_str: str) -> tuple[str, dict] | None:
             param_value = param_value[:-1]
         param_dict[param_name] = param_value
 
-    return function_name, param_dict
+    return ToolCall(name=function_name, arguments=param_dict)
 
 
-def _parse_one(raw: str) -> tuple[str, dict] | None:
+def _parse_one(raw: str) -> ToolCall | None:
     """Parse a single <tool_call> body as JSON or XML."""
     raw = raw.strip()
 
@@ -46,7 +53,7 @@ def _parse_one(raw: str) -> tuple[str, dict] | None:
     try:
         obj = json.loads(raw)
         if isinstance(obj, dict) and "name" in obj:
-            return obj["name"], obj.get("arguments", {})
+            return ToolCall(name=obj["name"], arguments=obj.get("arguments", {}))
     except (json.JSONDecodeError, TypeError):
         pass
 
@@ -58,17 +65,11 @@ def _parse_one(raw: str) -> tuple[str, dict] | None:
     return None
 
 
-def extract_tool_calls(text: str) -> list[tuple[str, dict]]:
-    """Extract all (name, arguments) pairs from model output."""
-    results: list[tuple[str, dict]] = []
+def extract_tool_calls(text: str) -> list[ToolCall]:
+    """Extract tool calls, leaving argument validation to the rollout."""
+    results: list[ToolCall] = []
     for m in _TOOL_CALL_RE.finditer(text):
         parsed = _parse_one(m.group(1))
         if parsed is not None:
             results.append(parsed)
     return results
-
-
-def extract_tool_call(text: str) -> tuple[str, dict] | None:
-    """Extract the first (name, arguments) from model output, or None."""
-    calls = extract_tool_calls(text)
-    return calls[0] if calls else None
