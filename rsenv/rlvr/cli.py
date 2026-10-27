@@ -16,12 +16,13 @@ from dataclasses import asdict
 from pathlib import Path
 from types import FrameType
 
-from rsenv.rlvr.contracts import EpisodeResult, TaskSpec, fingerprint
+from rsenv.rlvr.benchmark import benchmark_report
+from rsenv.rlvr.contracts import AcquireGoal, EpisodeResult, TaskSpec, fingerprint
 from rsenv.rlvr.learning import build_examples
 from rsenv.rlvr.records import Recorder, atomic_json
 from rsenv.rlvr.rollout import ScriptedPolicy
-from rsenv.rlvr.runner import collect, summary, train
-from rsenv.rlvr.tasks import verify_harvest
+from rsenv.rlvr.runner import EpisodeJob, collect_jobs, summary, train
+from rsenv.rlvr.tasks import verify_task
 from rsenv.rlvr.worlds import doctor
 
 
@@ -31,6 +32,7 @@ def source_identity() -> str:
         [
             *root.joinpath("rsenv").glob("*.py"),
             *root.joinpath("rsenv/rlvr").glob("*.py"),
+            *root.joinpath("rsenv/rlvr").glob("*.json"),
             *root.joinpath("rsenv/bridge/rlvr").glob("*.ts"),
         ]
     )
@@ -75,11 +77,20 @@ def main(argv: list[str] | None = None) -> None:
     tasks = (
         [TaskSpec.model_validate(t) for t in json.loads(args.manifest.read_text())] if args.manifest else [TaskSpec()]
     )
+    if len({t.id for t in tasks}) != len(tasks):
+        parser.error("Task IDs must be unique")
     if not tasks:
         parser.error("Task manifest must not be empty")
     if args.command == "smoke":
         if args.manifest is None:
-            tasks = [TaskSpec(id="gather_logs_1/smoke-v1", quantity=1, max_turns=6, episode_seconds=120)]
+            tasks = [
+                TaskSpec(
+                    id="gather_logs_1/smoke-v2",
+                    objectives=(AcquireGoal(item_id=1511, quantity=1),),
+                    max_turns=6,
+                    episode_seconds=120,
+                )
+            ]
         if len(tasks) != 1:
             parser.error("smoke requires exactly one task")
     if args.command == "replay":
@@ -104,7 +115,7 @@ def main(argv: list[str] | None = None) -> None:
             if episode.status == "infra_invalid":
                 continue
             task = by_hash[episode.task_hash]
-            verified = verify_harvest(task, episode.receipt, [t.outcome for t in episode.transitions if t.outcome])
+            verified = verify_task(task, episode.receipt, [t.outcome for t in episode.transitions if t.outcome])
             if verified != episode.verification or float(verified.success) != episode.reward:
                 raise ValueError(f"Verifier replay mismatch: {episode.episode_id}")
             count += 1
@@ -126,7 +137,7 @@ def main(argv: list[str] | None = None) -> None:
                 "git_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
                 "source_diff_hash": fingerprint(subprocess.check_output(["git", "diff"], text=True)),
                 "source_identity": source_identity(),
-                "protocol_version": 1,
+                "protocol_version": 2,
                 "packages": {p: importlib.metadata.version(p) for p in ("pydantic",)},
                 "tasks": [t.model_dump(mode="json") for t in tasks],
                 "seed": args.seed,
@@ -157,6 +168,8 @@ def main(argv: list[str] | None = None) -> None:
             if resumed:
                 tasks = [TaskSpec.model_validate(t) for t in resumed["tasks"]]
                 args.seed, args.group_size, args.model = resumed["seed"], resumed["group_size"], resumed["model"]
+            if args.command == "train" and any(task.split != "train" for task in tasks):
+                parser.error("Training requires a train split; calibration and held-out tasks are evaluation-only")
             backend = TinkerBackend(
                 args.model,
                 seed=args.seed,
@@ -184,13 +197,16 @@ def main(argv: list[str] | None = None) -> None:
             policy = ScriptedPolicy(args.fail_policy, reset_probe=args.command == "reset-check")
         for workers in [1, 2, 4] if args.command == "profile" else [args.workers]:
             started = time.monotonic()
-            episodes = []
-            for task_index, task in enumerate(tasks):
-                episodes.extend(
-                    collect(task, policy, args.episodes, workers, args.seed + task_index * 100_000, directory, recorder)
-                )
-            report = {"workers": workers, **summary(episodes, time.monotonic() - started)}
-            atomic_json(directory / f"summary-{workers}.json", report)
+            jobs = [
+                EpisodeJob(task, (args.seed + int(fingerprint(task.id)[:8], 16) + repeat * 1000) % (2**31 - 1))
+                for repeat in range(args.episodes)
+                for task in tasks
+            ]
+            episodes = collect_jobs(jobs, policy, workers, directory, recorder)
+            elapsed = time.monotonic() - started
+            report = benchmark_report(tasks, episodes, elapsed)
+            atomic_json(directory / "benchmark.json", report)
+            atomic_json(directory / f"summary-{workers}.json", {"workers": workers, **summary(episodes, elapsed)})
             print(json.dumps(report, indent=2), flush=True)
             if any(e.status == "infra_invalid" for e in episodes):
                 raise SystemExit(1)

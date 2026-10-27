@@ -13,13 +13,13 @@ from rsenv.rlvr.contracts import InfrastructureError, ResetSpec, TaskSpec
         {"episode_id": "old"},
         {"world_id": "other"},
         {"request_id": "2"},
-        {"version": 2},
+        {"version": 1},
         {"status": "infra_error"},
     ],
 )
 def test_response_correlation_poisoning(change: dict[str, str | int]) -> None:
     client = VerifiedBridgeClient(SimpleNamespace(world_id="world"), TaskSpec(), "episode")
-    response = dict(version=1, episode_id="episode", world_id="world", request_id="1", status="ok")
+    response = dict(version=2, episode_id="episode", world_id="world", request_id="1", status="ok")
     client.responses.put({**response, **change})
     with pytest.raises(InfrastructureError):
         client._receive("1", 0.01)
@@ -32,7 +32,7 @@ def test_timeout_poisoning_rejects_late_result() -> None:
     client = VerifiedBridgeClient(SimpleNamespace(world_id="world"), TaskSpec(), "episode")
     with pytest.raises(InfrastructureError):
         client._receive("1", 0.001)
-    client.responses.put(dict(version=1, episode_id="episode", world_id="world", request_id="1", status="ok"))
+    client.responses.put(dict(version=2, episode_id="episode", world_id="world", request_id="1", status="ok"))
     with pytest.raises(InfrastructureError, match="unavailable"):
         client.rpc("state", 0.01)
 

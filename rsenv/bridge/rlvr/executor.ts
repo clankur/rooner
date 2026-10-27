@@ -1,8 +1,8 @@
-// JSON-line v1 protocol. Gameplay uses the real SDK; evidence comes from the engine.
+// JSON-line v2 protocol. Gameplay uses the real SDK; evidence comes from the engine.
 import { BotSDK } from '../rs-sdk/sdk/index';
-import { BotActions } from '../rs-sdk/sdk/actions';
 import puppeteer from 'puppeteer';
 import { createInterface } from 'node:readline';
+import content from '../../rlvr/content.json';
 import type { Observation, Resource } from './engine_control';
 
 console.log = console.info = console.warn = (..._args: unknown[]) => {}; // SDK may log credential URLs.
@@ -18,11 +18,9 @@ const sdk = new BotSDK({
     autoReconnect: false,
     showChat: false,
 });
-const bot = new BotActions(sdk);
 let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
 let lastId = 0;
-const unavailableUntil = new Map<string, number>();
-const resourceKey = (r: Resource): string => `${r.id}:${r.x}:${r.z}`;
+const harvests = new Map(content.harvests.flatMap(row => row.loc_ids.map(id => [id, row] as const)));
 class ActionBudgetReached extends Error {}
 
 function diagnose(error: unknown): void {
@@ -70,91 +68,78 @@ interface Command {
     request_id: string;
     timeout_ms: number;
     operation: string;
+    max_ticks: number;
     name: string;
     arguments: Record<string, unknown>;
 }
 
-async function action(name: string, args: Record<string, unknown>, deadline: number): Promise<ActionOutcome> {
+async function action(name: string, args: Record<string, unknown>, deadline: number, tickBudget: number): Promise<ActionOutcome> {
     const start = performance.now();
     const before = await engine('state');
-    if (before.pending) throw new Error('Uncancelled activity before action');
+    if (!before.paused) throw new Error('Decision boundary is not paused');
     let status: ActionOutcome['status'] = 'failed';
     let reason = 'precondition';
     let target: Resource | null = null;
-    if (name === 'chopTree') {
-        if (args.tree_type && args.tree_type !== 'Tree') throw new Error('Unsupported resource type');
-        const tree = before.resources
-            .filter((r) => (unavailableUntil.get(resourceKey(r)) ?? 0) < Date.now())
-            .sort(
-                (a, b) =>
-                    Math.abs(a.x - before.position[0]) +
-                    Math.abs(a.z - before.position[1]) -
-                    Math.abs(b.x - before.position[0]) -
-                    Math.abs(b.z - before.position[1]),
-            )[0];
-        target = tree ?? null;
-        if (
-            tree &&
-            before.inventory.length < 28 &&
-            [...before.inventory, ...before.equipment].some((i) => i.id === 1351)
-        ) {
-            const result = await sdk.sendInteractLoc(tree.x, tree.z, tree.id, 1);
-            diagnose(`action_accepted:${result.success}`);
-            if (result.success) {
-                try {
-                    const observed = await until(
-                        (s) =>
-                            s.tick > before.tick &&
-                            (count(s, 1511) > count(before, 1511) ||
-                                !s.resources.some((r) => r.id === tree.id && r.x === tree.x && r.z === tree.z)),
-                        deadline - 2000,
-                    );
-                    status = count(observed, 1511) > count(before, 1511) ? 'completed' : 'failed';
-                    reason = status === 'completed' ? 'harvested' : 'resource_unavailable';
-                    diagnose(`action_observed:${reason}`);
-                } catch (error) {
-                    if (!(error instanceof ActionBudgetReached)) throw error;
-                    diagnose(`action_budget:${JSON.stringify(await engine('state'))}`);
-                    reason = 'no_harvest_within_action_budget';
-                    unavailableUntil.set(resourceKey(tree), Date.now() + 60000);
-                }
-            } else reason = 'interaction_rejected';
-        }
-    } else if (name === 'walkTo') {
-        if (
-            typeof args.x !== 'number' ||
-            typeof args.z !== 'number' ||
-            !Number.isInteger(args.x) ||
-            !Number.isInteger(args.z)
-        )
-            throw new Error('Invalid coordinates');
-        const result = await bot.walkTo(args.x, args.z);
-        const observed = await engine('state');
-        status =
-            result.success && observed.position[0] === args.x && observed.position[1] === args.z
-                ? 'completed'
-                : 'failed';
-        reason = status === 'completed' ? 'arrived' : 'path_failed';
-    } else if (name === 'equipItem') {
-        if (args.item !== 'Bronze axe') throw new Error('Only the fixture axe can be equipped');
-        const result = await bot.equipItem(/^Bronze axe$/i);
-        const observed = await engine('state');
-        status = result.success && observed.equipment.some((i) => i.id === 1351) ? 'completed' : 'failed';
-        reason = status === 'completed' ? 'equipped' : 'equip_failed';
-    } else throw new Error('Unsupported action');
-    const canceled = await engine('cancel', 'POST');
-    let after = canceled;
-    while (Date.now() < deadline) {
-        after = await engine('state');
-        if (after.tick > canceled.tick && !after.pending) break;
-        if (after.pending) await engine('cancel', 'POST');
-        await Bun.sleep(50);
+    const maxTicks = Math.min(tickBudget, name === 'wait' ? Number(args.ticks) : name === 'attackNpc' ? 10 : 35);
+    let rule: typeof content.harvests[number] | undefined;
+    if (name === 'harvest') {
+        target = before.resources.find(r => r.id === args.id && r.x === args.x && r.z === args.z) ?? null;
+        rule = target ? harvests.get(target.id) : undefined;
+    } else if (name === 'attackNpc') {
+        target = before.npcs.find(n => n.index === args.index) ?? null;
     }
-    if (after.tick <= canceled.tick || after.pending) throw new Error('Cancellation outcome unknown');
-    // A harvest may land on the cancellation tick; the final engine state decides.
-    if (name === 'chopTree' && count(after, 1511) > count(before, 1511)) {
-        status = 'completed';
-        reason = 'harvested';
+    if ((name === 'harvest' || name === 'attackNpc') && !target) {
+        const after = await engine('state');
+        return { name, status, reason: 'target_not_visible', before, after, target, elapsed_seconds: (performance.now() - start) / 1000 };
+    }
+    await engine(`resume?ticks=${maxTicks}`, 'POST');
+    try {
+        let accepted = false;
+        if (name === 'harvest' && target && rule) {
+            accepted = (await sdk.sendInteractLoc(target.x, target.z, target.id, 1)).success;
+        } else if (name === 'attackNpc' && target) {
+            const npc = sdk.getState()?.nearbyNpcs.find(n => n.index === target!.index);
+            const option = npc?.optionsWithIndex.find(o => o.text.toLowerCase() === 'attack');
+            if (option) accepted = (await sdk.sendInteractNpc(target.index!, option.opIndex)).success;
+        } else if (name === 'walkTo') {
+            accepted = (await sdk.sendWalk(Number(args.x), Number(args.z))).success;
+        } else if (name === 'equipItem' || name === 'eatFood') {
+            const item = sdk.getInventory().find(i => i.slot === args.slot);
+            const option = item?.optionsWithIndex.find(o => name === 'equipItem' ? /^(wield|wear|equip)$/i.test(o.text) : /^eat$/i.test(o.text));
+            if (item && option) accepted = (await sdk.sendUseItem(item.slot, option.opIndex)).success;
+        } else if (name === 'setCombatStyle') {
+            accepted = (await sdk.sendSetCombatStyle(Number(args.style))).success;
+        } else if (name === 'wait') {
+            accepted = true;
+        } else throw new Error('Unsupported action');
+        if (accepted) {
+            try {
+                const state = await until(s => {
+                    if (s.tick <= before.tick) return false;
+                    if (s.hp <= 0 || !s.in_game || s.tick - before.tick >= maxTicks) return true;
+                    if (name === 'harvest' && rule) return count(s, rule.item_id) > count(before, rule.item_id);
+                    if (name === 'walkTo') return s.position[0] === args.x && s.position[1] === args.z;
+                    if (name === 'equipItem') return JSON.stringify(s.equipment) !== JSON.stringify(before.equipment);
+                    if (name === 'eatFood') return s.inventory.length < before.inventory.length;
+                    if (name === 'setCombatStyle') return s.combat_style === args.style;
+                    return false;
+                }, deadline - 2000);
+                status = 'completed';
+                reason = state.hp <= 0 ? 'death' : 'action_window_complete';
+            } catch (error) {
+                if (!(error instanceof ActionBudgetReached)) throw error;
+                reason = 'action_budget';
+            }
+        } else reason = 'interaction_rejected';
+        // Harvesting and walking stop at their boundary. Combat persists while paused.
+        if (name === 'harvest' || name === 'walkTo') await engine('cancel', 'POST');
+    } finally {
+        await engine('pause', 'POST');
+    }
+    const after = await engine('state');
+    if (rule) {
+        status = count(after, rule.item_id) > count(before, rule.item_id) ? 'completed' : 'failed';
+        reason = status === 'completed' ? 'harvested' : 'no_yield';
     }
     return { name, status, reason, before, after, target, elapsed_seconds: (performance.now() - start) / 1000 };
 }
@@ -202,14 +187,14 @@ try {
     if (!sdk.getState()?.inGame) throw new Error('Browser did not enter game');
     await sdk.waitForTicks(3);
     const state = await engine('bootstrap', 'POST');
-    send({ version: 1, episode_id: episode, world_id: world, request_id: '0', status: 'ready', state });
+    send({ version: 2, episode_id: episode, world_id: world, request_id: '0', status: 'ready', state });
     for await (const line of createInterface({ input: process.stdin })) {
         let requestId = '';
         try {
             const cmd: Command = JSON.parse(line);
             requestId = cmd.request_id;
             if (
-                cmd.version !== 1 ||
+                cmd.version !== 2 ||
                 cmd.episode_id !== episode ||
                 cmd.world_id !== world ||
                 !Number.isInteger(Number(cmd.request_id)) ||
@@ -227,7 +212,8 @@ try {
             if (cmd.operation === 'state') {
                 task = engine('state');
             } else if (cmd.operation === 'action') {
-                task = action(cmd.name, cmd.arguments, deadline);
+                if (!Number.isInteger(cmd.max_ticks) || cmd.max_ticks < 1 || cmd.max_ticks > 35) throw new Error('Invalid tick budget');
+                task = action(cmd.name, cmd.arguments, deadline, cmd.max_ticks);
             } else {
                 throw new Error('Unknown operation');
             }
@@ -238,7 +224,7 @@ try {
                 }),
             ]).finally(() => clearTimeout(timer!));
             send({
-                version: 1,
+                version: 2,
                 request_id: cmd.request_id,
                 episode_id: episode,
                 world_id: world,
@@ -248,7 +234,7 @@ try {
         } catch (_error) {
             diagnose(_error);
             send({
-                version: 1,
+                version: 2,
                 request_id: requestId,
                 episode_id: episode,
                 world_id: world,
@@ -261,7 +247,7 @@ try {
 } catch (_error) {
     diagnose(_error);
     send({
-        version: 1,
+        version: 2,
         episode_id: episode,
         world_id: world,
         request_id: '0',

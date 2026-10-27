@@ -23,15 +23,20 @@ uv run python -m rsenv.rlvr smoke --manifest configs/rlvr-smoke.json --workers 2
 
 The smoke runs four episodes: equip an axe, gather a log in each of two worlds, and finish without gathering as a zero-reward control. It checks resets, rewards, and replay of recorded evidence. It needs no model weights or Tinker account.
 
-## Train and evaluate
+## Evaluate task difficulty first
 
 Set `TINKER_API_KEY` for an account with billing access.
 
 ```sh
+uv run python -m rsenv.rlvr evaluate --manifest configs/rlvr-calibration.json --episodes 3 --workers 3 --output outputs/baseline
 uv run python -m rsenv.rlvr train --manifest configs/rlvr-train.json --workers 2 --group-size 4 --iterations 25 --output outputs/train
 uv run python -m rsenv.rlvr train --resume outputs/train/checkpoint.json --iterations 50
-uv run python -m rsenv.rlvr evaluate --checkpoint 'tinker://SAMPLER_PATH' --manifest configs/rlvr-heldout.json --episodes 10
+uv run python -m rsenv.rlvr evaluate --checkpoint 'tinker://SAMPLER_PATH' --manifest configs/rlvr-calibration.json --episodes 10
 ```
+
+The twelve calibration tasks cover gathering, mining, combat, and ordered goals. The model chooses explicit targets; simulation pauses between decisions, and latency is reported separately. Review [the evaluation workflow](docs/task-evaluation.md) before training. This calibration set is not a held-out benchmark.
+
+The [initial baseline](docs/calibration-2026-10-27.md) succeeded in 30/35 valid episodes, with one additional verifier rejection. Combat and recovery need closer evaluation before training.
 
 Training uses verified episode groups, masked token advantages, and equal trajectory weights. Optimizer state and sampler weights are checkpointed after each update. A small hosted run exercised sampling, optimization, and checkpointing; see [validation results](docs/live-rlvr-validation.md). It does not establish learning improvement.
 
@@ -42,6 +47,6 @@ Training uses verified episode groups, masked token advantages, and equal trajec
 - `rsenv/tools.py`, `tool_parser.py`, `rsenv/rlvr/rollout.py`: tool schemas, parsing, and the episode loop.
 - `rsenv/rlvr/learning.py`, `tinker_backend.py`, `runner.py`: GRPO examples, service calls, and training.
 - `rsenv/rlvr/records.py`, `cli.py`: persisted evidence, replay, and commands.
-- `configs/rlvr-*.json`: smoke, training, and held-out task manifests.
+- `configs/rlvr-*.json`: smoke, training examples, and calibration task manifests.
 
 See [setup and operation](docs/live-rlvr.md), [reward and weighting](docs/reward_function_best_practices.md), and [validation results](docs/live-rlvr-validation.md).

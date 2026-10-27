@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -24,28 +24,56 @@ if TYPE_CHECKING:
     from rsenv.rlvr.tinker_backend import TinkerBackend
 
 
+@dataclass(frozen=True)
+class EpisodeJob:
+    task: TaskSpec
+    seed: int
+
+
 def collect(
     task: TaskSpec, policy: Policy, count: int, workers: int, seed: int, directory: Path, recorder: Recorder
 ) -> list[EpisodeResult]:
-    if count < 1 or workers < 1:
-        raise ValueError("Positive episode and worker counts required")
+    if count < 1:
+        raise ValueError("Positive episode count required")
+    return collect_jobs([EpisodeJob(task, seed + i * 1000) for i in range(count)], policy, workers, directory, recorder)
+
+
+def collect_jobs(
+    jobs: list[EpisodeJob], policy: Policy, workers: int, directory: Path, recorder: Recorder
+) -> list[EpisodeResult]:
+    if not jobs or workers < 1:
+        raise ValueError("Episode jobs and positive worker count required")
 
     clients: list[VerifiedBridgeClient] = []
     clients_lock = threading.Lock()
     cancelled = threading.Event()
 
-    def episode(index: int) -> EpisodeResult:
+    def episode(job: EpisodeJob) -> EpisodeResult:
+        task = job.task
         lease = WorldLease(directory / "worlds")
         client = VerifiedBridgeClient(lease, task, uuid.uuid4().hex)
         with clients_lock:
             if cancelled.is_set():
                 raise InfrastructureError("collection_cancelled")
             clients.append(client)
-        return rollout(client, task, policy, seed + index * 1000, recorder)
+        result = rollout(client, task, policy, job.seed, recorder)
+        print(
+            json.dumps(
+                {
+                    "task_id": task.id,
+                    "seed": job.seed,
+                    "status": result.status,
+                    "reward": result.reward,
+                    "reason": result.reason,
+                }
+            ),
+            flush=True,
+        )
+        return result
 
-    pool = ThreadPoolExecutor(max_workers=min(count, workers))
+    pool = ThreadPoolExecutor(max_workers=min(len(jobs), workers))
     try:
-        futures = [pool.submit(episode, i) for i in range(count)]
+        futures = [pool.submit(episode, job) for job in jobs]
         return [future.result() for future in futures]
     except BaseException:
         with clients_lock:
@@ -125,6 +153,18 @@ def summary(episodes: list[EpisodeResult], wall_seconds: float) -> dict[str, Any
         "action_seconds": percentiles(
             [t.outcome.elapsed_seconds for e in episodes for t in e.transitions if t.outcome]
         ),
+        "game_ticks": percentiles(
+            [
+                e.transitions[-1].observation.tick - e.receipt.observation.tick
+                for e in episodes
+                if e.receipt and e.transitions
+            ]
+        ),
+        "sampling_total_seconds": sum(t.sampling_seconds for e in episodes for t in e.transitions),
+        "invalid_decisions": sum(t.parsed.status == "invalid" for e in episodes for t in e.transitions),
+        "action_failures": sum(
+            t.outcome is not None and t.outcome.status == "failed" for e in episodes for t in e.transitions
+        ),
         "generated_tokens": sum(len(t.turn.output_ids) for e in episodes for t in e.transitions),
         "prompt_tokens": sum(len(t.turn.prompt_ids) for e in episodes for t in e.transitions),
         "engine_peak_rss_bytes": max((s.runtime.get("engine_rss_bytes", 0) for s in states), default=0),
@@ -160,6 +200,7 @@ def train(
         "clip_high": 1.2,
         "temperature": 1.0,
         "max_tokens": 512,
+        "max_context": policy.max_context,
         "thinking": False,
         "kl_beta": 0.0,
         "renderer": policy.renderer,

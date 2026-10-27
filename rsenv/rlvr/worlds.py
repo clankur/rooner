@@ -241,6 +241,19 @@ class WorldLease:
         (engine.parent / "content").symlink_to(self.sdk / "server/content", target_is_directory=True)
         (self.workdir / "fixture.json").write_text(spec.model_dump_json())
         shutil.copy2(BRIDGE_DIR / "rlvr/engine_control.ts", engine / "src/rlvr_control.ts")
+        shutil.copy2(Path(__file__).with_name("content.json"), engine / "src/rlvr_content.json")
+        replace_once(
+            engine / "src/engine/World.ts",
+            "    cycle(): void {",
+            "    cycle(): void {\n"
+            "        const clock = globalThis as typeof globalThis & { rlvrPaused?: boolean; rlvrPauseAt?: number };\n"
+            "        if (clock.rlvrPauseAt !== undefined && this.currentTick >= clock.rlvrPauseAt) clock.rlvrPaused = true;\n"
+            "        if (clock.rlvrPaused) {\n"
+            "            this.nextTick = Date.now() + this.tickRate;\n"
+            "            setTimeout(this.cycle.bind(this), 50);\n"
+            "            return;\n"
+            "        }",
+        )
         replace_once(
             engine / "src/app.ts",
             "await World.start();",

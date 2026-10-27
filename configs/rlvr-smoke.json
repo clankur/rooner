@@ -1,9 +1,16 @@
 [
   {
-    "id": "gather_logs_1/smoke-v1",
-    "quantity": 1,
+    "id": "gather_logs_1/smoke-v2",
     "max_turns": 6,
     "episode_seconds": 120,
-    "action_seconds": 30
+    "action_seconds": 30,
+    "objectives": [
+      {
+        "kind": "acquire",
+        "item_id": 1511,
+        "quantity": 1
+      }
+    ],
+    "split": "smoke"
   }
 ]

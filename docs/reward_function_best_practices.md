@@ -4,15 +4,9 @@ The runner uses task-specific binary rewards and group-normalized advantages.
 
 ## Live task reward
 
-[`verify_harvest`](../rsenv/rlvr/tasks.py) awards success when an episode harvests the requested number of normal logs and retains them in inventory. Each credited action must identify a tree from the preceding observation, add logs, and add 250 engine XP tenths per log to woodcutting.
+`verify_task` evaluates acquisition, skill, equipment, and location goals over authoritative evidence. Goals may be unordered or sequential, with item-preservation and final-health constraints. See [task evaluation](task-evaluation.md) for task authoring and timing.
 
-The verifier checks the reset receipt, episode/world identity, observation order, and continuity between actions. Unattributed inventory or XP changes, bank mutations, and pending actions invalidate the evidence.
-
-- Verified success: reward `1.0`.
-- Valid episode ending before success: reward `0.0`, including a final answer or an exhausted budget.
-- Infrastructure failure or invalid evidence: reward `None`; training rejects the group.
-
-Partial progress is reported to the policy but does not contribute reward. Tool syntax alone earns no reward.
+The verifier checks episode/world identity, reset receipts, paused decision boundaries, and continuity. Harvesting requires matched item and XP changes from an observed target. Combat permits its companion Hitpoints XP. Infrastructure failures receive `None`; valid failures and exhausted gameplay budgets receive `0.0`; verified completion receives `1.0`. Progress is reported to the policy but is not a shaped reward.
 
 ## Group normalization and token weighting
 

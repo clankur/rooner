@@ -43,7 +43,7 @@ class TinkerPolicy:
         tokenizer: PreTrainedTokenizerBase,
         version: str,
         max_tokens: int = 512,
-        max_context: int = 16384,
+        max_context: int = 65536,
         temperature: float = 1.0,
     ) -> None:
         self.sampler = sampler
@@ -68,7 +68,7 @@ class TinkerPolicy:
                 output_ids=(),
                 logprobs=(),
                 text="",
-                stop_reason="max_tokens",
+                stop_reason="context_limit",
                 policy_version=self.version,
                 renderer=self.renderer,
                 seed=seed,

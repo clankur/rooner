@@ -38,7 +38,7 @@ def test_sampling_preserves_tool_tokens_and_behavior_probabilities() -> None:
 
         def decode(self, tokens: list[int], skip_special_tokens: bool) -> str:
             assert tokens == [4, 5] and not skip_special_tokens
-            return '<tool_call>{"name":"chopTree","arguments":{}}</tool_call>'
+            return '<tool_call>{"name":"harvest","arguments":{"id":1276,"x":3200,"z":3220}}</tool_call>'
 
     class Sampler:
         def sample(self, model_input: ModelInput, num_samples: int, sampling_params: SamplingParams) -> Future:

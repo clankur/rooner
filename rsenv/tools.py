@@ -1,33 +1,63 @@
-"""Tool schemas for the live log-gathering task."""
+"""Explicit game actions; targets come from the current observation."""
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class ChopTree(BaseModel):
-    """Chop a nearby normal tree and wait for logs."""
+class Harvest(BaseModel):
+    """Harvest the selected visible tree or rock; stops after a yield or bounded attempt."""
 
-    tree_type: Literal["Tree"] | None = Field(None, description="Name of the tree to chop")
+    id: int = Field(ge=0, description="Location type ID from resources")
+    x: int = Field(ge=0, lt=16384)
+    z: int = Field(ge=0, lt=16384)
 
 
 class WalkTo(BaseModel):
-    """Walk to coordinates using pathfinding, auto-opening doors."""
+    """Walk to coordinates using game pathfinding; blocked routes may require another destination."""
 
-    x: int = Field(..., ge=0, lt=16384, description="World X coordinate")
-    z: int = Field(..., ge=0, lt=16384, description="World Z coordinate")
+    x: int = Field(ge=0, lt=16384)
+    z: int = Field(ge=0, lt=16384)
 
 
 class EquipItem(BaseModel):
-    """Equip the bronze axe from inventory."""
+    """Equip the selected inventory item."""
 
-    item: Literal["Bronze axe"] = Field(..., description="Item name to equip")
+    slot: int = Field(ge=0, lt=28)
+
+
+class AttackNpc(BaseModel):
+    """Attack the selected visible NPC for up to 10 game ticks. Combat persists between turns."""
+
+    index: int = Field(ge=0, description="NPC index from npcs")
+
+
+class SetCombatStyle(BaseModel):
+    """Choose melee training style: 0 Attack, 1 Strength, 2 controlled (sword) or Defence (unarmed), 3 Defence (sword/axe)."""
+
+    style: int = Field(ge=0, le=3)
+
+
+class EatFood(BaseModel):
+    """Eat food from the selected inventory slot."""
+
+    slot: int = Field(ge=0, lt=28)
+
+
+class Wait(BaseModel):
+    """Advance game ticks, continuing any ongoing combat. The game is paused while you think."""
+
+    ticks: int = Field(ge=1, le=10)
 
 
 TOOL_MODELS: dict[str, type[BaseModel]] = {
-    "chopTree": ChopTree,
+    "harvest": Harvest,
     "walkTo": WalkTo,
     "equipItem": EquipItem,
+    "attackNpc": AttackNpc,
+    "setCombatStyle": SetCombatStyle,
+    "eatFood": EatFood,
+    "wait": Wait,
 }
 
 

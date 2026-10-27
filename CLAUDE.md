@@ -88,6 +88,14 @@ uv run --group docs quarto preview docs
 uv run --group docs quarto render docs
 ```
 
+### Evaluate task difficulty
+
+```
+uv run python -m rsenv.rlvr evaluate --manifest configs/rlvr-calibration.json --episodes 3 --workers 3 --output outputs/baseline
+```
+
+Review baseline results before training. See `docs/task-evaluation.md`.
+
 ## Architecture
 
 - `rsenv/rlvr/contracts.py`, `tasks.py` — Task specifications, episode evidence, and reward verification.
@@ -96,4 +104,4 @@ uv run --group docs quarto render docs
 - `rsenv/tools.py`, `tool_parser.py`, `rsenv/rlvr/rollout.py` — Tool schemas, parsing, and episode control flow.
 - `rsenv/rlvr/learning.py`, `tinker_backend.py`, `runner.py` — Token masks, GRPO weighting, service calls, and checkpointed training.
 - `rsenv/rlvr/records.py`, `cli.py` — Durable records, replay, and command entry point.
-- `configs/rlvr-*.json` — Smoke, training, and held-out task manifests.
+- `configs/rlvr-*.json` — Smoke, calibration, and training task manifests.

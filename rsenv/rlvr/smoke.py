@@ -11,7 +11,7 @@ from rsenv.rlvr.contracts import EpisodeResult, TaskSpec
 from rsenv.rlvr.records import Recorder, atomic_json
 from rsenv.rlvr.rollout import ScriptedPolicy
 from rsenv.rlvr.runner import collect, summary
-from rsenv.rlvr.tasks import verify_harvest
+from rsenv.rlvr.tasks import verify_task
 
 
 def check_phase(name: str, episodes: list[EpisodeResult]) -> None:
@@ -61,7 +61,7 @@ def run_smoke(task: TaskSpec, directory: Path, workers: int, seed: int) -> dict[
             if record["kind"] != "episode":
                 continue
             episode = EpisodeResult.model_validate(record["data"])
-            verified = verify_harvest(task, episode.receipt, [t.outcome for t in episode.transitions if t.outcome])
+            verified = verify_task(task, episode.receipt, [t.outcome for t in episode.transitions if t.outcome])
             if verified != episode.verification or float(verified.success) != episode.reward:
                 raise ValueError("Persisted reward replay mismatch")
             replayed += 1

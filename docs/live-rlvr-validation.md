@@ -2,6 +2,8 @@
 
 The live environment path is exercised on this macOS workspace. Hosted validation was initially blocked by Tinker billing. The 2026-10-24 hosted experiment below exercised real sampling and optimizer updates. No learning improvement is claimed.
 
+The later [2026-10-27 calibration](calibration-2026-10-27.md) covers the current multi-task protocol, paused decisions, twelve reference tasks, and a 36-episode base-model evaluation. The historical commands and records below use their corresponding commits.
+
 ## Passed checks
 
 - 42 offline tests: reset/verifier invariants, adversarial evidence, action parsing, protocol correlation, timeouts, token alignment and masks, group rejection, checkpoint failure recovery, SDK payloads, finite-loss guards, and partial startup cleanup.

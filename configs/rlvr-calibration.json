@@ -1,0 +1,525 @@
+[
+  {
+    "id": "logs-one/v2",
+    "family": "woodcutting",
+    "difficulty": "control",
+    "split": "calibration",
+    "reset": {
+      "position": [
+        3200,
+        3220,
+        0
+      ],
+      "inventory": [
+        {
+          "slot": 0,
+          "id": 1351,
+          "count": 1
+        }
+      ]
+    },
+    "objectives": [
+      {
+        "kind": "acquire",
+        "item_id": 1511,
+        "quantity": 1
+      }
+    ],
+    "max_turns": 24,
+    "game_ticks": 400,
+    "required_resource_items": [
+      1511
+    ]
+  },
+  {
+    "id": "logs-retain-tool/v2",
+    "family": "woodcutting",
+    "difficulty": "standard",
+    "split": "calibration",
+    "reset": {
+      "position": [
+        3200,
+        3220,
+        0
+      ],
+      "inventory": [
+        {
+          "slot": 0,
+          "id": 1351,
+          "count": 1
+        }
+      ]
+    },
+    "objectives": [
+      {
+        "kind": "acquire",
+        "item_id": 1511,
+        "quantity": 3
+      }
+    ],
+    "max_turns": 24,
+    "game_ticks": 400,
+    "preserve_items": [
+      1351
+    ],
+    "required_resource_items": [
+      1511
+    ]
+  },
+  {
+    "id": "logs-equip-first/v2",
+    "family": "woodcutting",
+    "difficulty": "challenge",
+    "split": "calibration",
+    "reset": {
+      "position": [
+        3200,
+        3220,
+        0
+      ],
+      "inventory": [
+        {
+          "slot": 0,
+          "id": 1351,
+          "count": 1
+        },
+        {
+          "slot": 1,
+          "id": 1265,
+          "count": 1
+        }
+      ]
+    },
+    "objectives": [
+      {
+        "kind": "equip",
+        "item_id": 1351
+      },
+      {
+        "kind": "acquire",
+        "item_id": 1511,
+        "quantity": 3
+      }
+    ],
+    "max_turns": 24,
+    "game_ticks": 400,
+    "ordered": true,
+    "required_resource_items": [
+      1511
+    ]
+  },
+  {
+    "id": "copper-one/v2",
+    "family": "mining",
+    "difficulty": "control",
+    "split": "calibration",
+    "reset": {
+      "position": [
+        3286,
+        3363,
+        0
+      ],
+      "inventory": [
+        {
+          "slot": 0,
+          "id": 1265,
+          "count": 1
+        }
+      ]
+    },
+    "objectives": [
+      {
+        "kind": "acquire",
+        "item_id": 436,
+        "quantity": 1
+      }
+    ],
+    "max_turns": 24,
+    "game_ticks": 400,
+    "required_resource_items": [
+      436,
+      438
+    ]
+  },
+  {
+    "id": "tin-one/v2",
+    "family": "mining",
+    "difficulty": "standard",
+    "split": "calibration",
+    "reset": {
+      "position": [
+        3286,
+        3363,
+        0
+      ],
+      "inventory": [
+        {
+          "slot": 0,
+          "id": 1265,
+          "count": 1
+        },
+        {
+          "slot": 1,
+          "id": 1351,
+          "count": 1
+        }
+      ]
+    },
+    "objectives": [
+      {
+        "kind": "acquire",
+        "item_id": 438,
+        "quantity": 1
+      }
+    ],
+    "max_turns": 24,
+    "game_ticks": 400,
+    "required_resource_items": [
+      436,
+      438
+    ]
+  },
+  {
+    "id": "ore-mixture/v2",
+    "family": "mining",
+    "difficulty": "challenge",
+    "split": "calibration",
+    "reset": {
+      "position": [
+        3286,
+        3363,
+        0
+      ],
+      "inventory": [
+        {
+          "slot": 0,
+          "id": 1265,
+          "count": 1
+        }
+      ]
+    },
+    "objectives": [
+      {
+        "kind": "acquire",
+        "item_id": 436,
+        "quantity": 2
+      },
+      {
+        "kind": "acquire",
+        "item_id": 438,
+        "quantity": 2
+      }
+    ],
+    "max_turns": 24,
+    "game_ticks": 400,
+    "required_resource_items": [
+      436,
+      438
+    ]
+  },
+  {
+    "id": "level-attack/v2",
+    "family": "combat",
+    "difficulty": "control",
+    "split": "calibration",
+    "reset": {
+      "position": [
+        3230,
+        3295,
+        0
+      ],
+      "inventory": [
+        {
+          "slot": 0,
+          "id": 1277,
+          "count": 1
+        },
+        {
+          "slot": 1,
+          "id": 2309,
+          "count": 1
+        },
+        {
+          "slot": 2,
+          "id": 2309,
+          "count": 1
+        },
+        {
+          "slot": 3,
+          "id": 2309,
+          "count": 1
+        }
+      ]
+    },
+    "objectives": [
+      {
+        "kind": "skill",
+        "skill": "attack",
+        "level": 2
+      }
+    ],
+    "max_turns": 48,
+    "game_ticks": 600,
+    "required_npcs": [
+      "Chicken"
+    ]
+  },
+  {
+    "id": "level-strength/v2",
+    "family": "combat",
+    "difficulty": "standard",
+    "split": "calibration",
+    "reset": {
+      "position": [
+        3230,
+        3295,
+        0
+      ],
+      "inventory": [
+        {
+          "slot": 0,
+          "id": 1277,
+          "count": 1
+        },
+        {
+          "slot": 1,
+          "id": 2309,
+          "count": 1
+        },
+        {
+          "slot": 2,
+          "id": 2309,
+          "count": 1
+        },
+        {
+          "slot": 3,
+          "id": 2309,
+          "count": 1
+        }
+      ]
+    },
+    "objectives": [
+      {
+        "kind": "skill",
+        "skill": "strength",
+        "level": 2
+      }
+    ],
+    "max_turns": 48,
+    "game_ticks": 600,
+    "required_npcs": [
+      "Chicken"
+    ]
+  },
+  {
+    "id": "level-defence/v2",
+    "family": "combat",
+    "difficulty": "challenge",
+    "split": "calibration",
+    "reset": {
+      "position": [
+        3230,
+        3295,
+        0
+      ],
+      "inventory": [
+        {
+          "slot": 0,
+          "id": 1277,
+          "count": 1
+        },
+        {
+          "slot": 1,
+          "id": 2309,
+          "count": 1
+        },
+        {
+          "slot": 2,
+          "id": 2309,
+          "count": 1
+        },
+        {
+          "slot": 3,
+          "id": 2309,
+          "count": 1
+        }
+      ]
+    },
+    "objectives": [
+      {
+        "kind": "skill",
+        "skill": "defence",
+        "level": 2
+      }
+    ],
+    "max_turns": 48,
+    "game_ticks": 600,
+    "required_npcs": [
+      "Chicken"
+    ]
+  },
+  {
+    "id": "mine-return/v2",
+    "family": "sequence",
+    "difficulty": "control",
+    "split": "calibration",
+    "reset": {
+      "position": [
+        3286,
+        3363,
+        0
+      ],
+      "inventory": [
+        {
+          "slot": 0,
+          "id": 1265,
+          "count": 1
+        },
+        {
+          "slot": 1,
+          "id": 1351,
+          "count": 1
+        }
+      ]
+    },
+    "objectives": [
+      {
+        "kind": "equip",
+        "item_id": 1265
+      },
+      {
+        "kind": "acquire",
+        "item_id": 436,
+        "quantity": 1
+      },
+      {
+        "kind": "reach",
+        "position": [
+          3286,
+          3363,
+          0
+        ],
+        "radius": 1
+      }
+    ],
+    "max_turns": 24,
+    "game_ticks": 400,
+    "ordered": true,
+    "required_resource_items": [
+      436,
+      438
+    ]
+  },
+  {
+    "id": "ordered-ores/v2",
+    "family": "sequence",
+    "difficulty": "standard",
+    "split": "calibration",
+    "reset": {
+      "position": [
+        3286,
+        3363,
+        0
+      ],
+      "inventory": [
+        {
+          "slot": 0,
+          "id": 1265,
+          "count": 1
+        }
+      ]
+    },
+    "objectives": [
+      {
+        "kind": "acquire",
+        "item_id": 436,
+        "quantity": 2
+      },
+      {
+        "kind": "acquire",
+        "item_id": 438,
+        "quantity": 2
+      },
+      {
+        "kind": "reach",
+        "position": [
+          3286,
+          3363,
+          0
+        ],
+        "radius": 1
+      }
+    ],
+    "max_turns": 24,
+    "game_ticks": 400,
+    "ordered": true,
+    "preserve_items": [
+      1265
+    ],
+    "required_resource_items": [
+      436,
+      438
+    ]
+  },
+  {
+    "id": "combat-return/v2",
+    "family": "sequence",
+    "difficulty": "challenge",
+    "split": "calibration",
+    "reset": {
+      "position": [
+        3230,
+        3295,
+        0
+      ],
+      "inventory": [
+        {
+          "slot": 0,
+          "id": 1277,
+          "count": 1
+        },
+        {
+          "slot": 1,
+          "id": 2309,
+          "count": 1
+        },
+        {
+          "slot": 2,
+          "id": 2309,
+          "count": 1
+        },
+        {
+          "slot": 3,
+          "id": 2309,
+          "count": 1
+        }
+      ]
+    },
+    "objectives": [
+      {
+        "kind": "equip",
+        "item_id": 1277
+      },
+      {
+        "kind": "skill",
+        "skill": "attack",
+        "level": 2
+      },
+      {
+        "kind": "reach",
+        "position": [
+          3230,
+          3295,
+          0
+        ],
+        "radius": 1
+      }
+    ],
+    "max_turns": 48,
+    "game_ticks": 600,
+    "ordered": true,
+    "required_npcs": [
+      "Chicken"
+    ]
+  }
+]

@@ -19,7 +19,7 @@ from rsenv.rlvr.contracts import (
 )
 from rsenv.rlvr.learning import TrainingExample, build_examples
 from rsenv.rlvr.rollout import ScriptedPolicy, parse_action, rollout
-from rsenv.rlvr.tasks import verify_harvest, verify_reset
+from rsenv.rlvr.tasks import verify_reset, verify_task
 
 
 @pytest.fixture
@@ -38,9 +38,10 @@ def initial() -> Observation:
         bank=(),
         hp=10,
         pending=False,
+        paused=True,
         tutorial=1000,
         in_game=True,
-        resources=tuple(Resource(id=i, x=3200 + i, z=3220, name="Tree") for i in range(6)),
+        resources=tuple(Resource(id=1276, x=3200 + i, z=3220, name="Tree") for i in range(6)),
     )
 
 
@@ -53,7 +54,7 @@ def harvest(before: Observation, count: int = 1, request_id: str = "1") -> Actio
     )
     return ActionOutcome(
         request_id=request_id,
-        name="chopTree",
+        name="harvest",
         status="completed",
         reason="harvested",
         before=before,
@@ -100,7 +101,7 @@ def test_reset_fingerprint_and_repeated_isolation(initial: Observation) -> None:
         ("pending", True),
         ("bank", (Item(slot=0, id=1511, count=1),)),
         ("position", (3201, 3220, 0)),
-        ("resources", ()),
+        ("paused", False),
     ]:
         with pytest.raises(InfrastructureError):
             verify_reset(TaskSpec(), initial.model_copy(update={field: value}))
@@ -108,16 +109,16 @@ def test_reset_fingerprint_and_repeated_isolation(initial: Observation) -> None:
 
 def test_goal_boundary_and_retention(initial: Observation) -> None:
     receipt = verify_reset(TaskSpec(), initial)
-    assert not verify_harvest(TaskSpec(), receipt, []).success
-    assert not verify_harvest(TaskSpec(), receipt, [harvest(initial, 4)]).success
-    assert verify_harvest(TaskSpec(), receipt, [harvest(initial, 5)]).success
+    assert not verify_task(TaskSpec(), receipt, []).success
+    assert not verify_task(TaskSpec(), receipt, [harvest(initial, 4)]).success
+    assert verify_task(TaskSpec(), receipt, [harvest(initial, 5)]).success
     with pytest.raises(InfrastructureError, match="duplicate"):
         action = harvest(initial)
-        verify_harvest(TaskSpec(), receipt, [action, action])
+        verify_task(TaskSpec(), receipt, [action, action])
 
 
 @pytest.mark.parametrize(
-    "attack", ["wrong_item", "wrong_skill", "stale", "foreign", "pending", "preloaded", "false_sdk"]
+    "attack", ["wrong_item", "wrong_skill", "stale", "foreign", "unpaused", "preloaded", "false_sdk"]
 )
 def test_verifier_rejects_adversarial_evidence(initial: Observation, attack: str) -> None:
     receipt = verify_reset(TaskSpec(), initial)
@@ -132,29 +133,35 @@ def test_verifier_rejects_adversarial_evidence(initial: Observation, attack: str
         action = action.model_copy(update={"after": action.after.model_copy(update={"tick": initial.tick})})
     elif attack == "foreign":
         action = action.model_copy(update={"after": action.after.model_copy(update={"episode_id": "other"})})
-    elif attack == "pending":
-        action = action.model_copy(update={"after": action.after.model_copy(update={"pending": True})})
+    elif attack == "unpaused":
+        action = action.model_copy(update={"after": action.after.model_copy(update={"paused": False})})
     elif attack == "preloaded":
         action = action.model_copy(update={"before": action.after})
     else:
         action = action.model_copy(update={"status": "failed"})
     with pytest.raises(InfrastructureError):
-        verify_harvest(TaskSpec(), receipt, [action])
+        verify_task(TaskSpec(), receipt, [action])
 
 
 @pytest.mark.parametrize(
     "text,status",
     [
-        ('<tool_call>{"name":"chopTree","arguments":{}}</tool_call>', "action"),
-        ("<tool_call><function=chopTree><parameter=tree_type>Tree</parameter></function></tool_call>", "action"),
+        ('<tool_call>{"name":"harvest","arguments":{"id":1276,"x":3200,"z":3220}}</tool_call>', "action"),
+        (
+            "<tool_call><function=harvest><parameter=id>1276</parameter><parameter=x>3200</parameter><parameter=z>3220</parameter></function></tool_call>",
+            "action",
+        ),
         ("<tool_call>{broken</tool_call>", "invalid"),
         ('<tool_call>{"name":[],"arguments":{}}</tool_call>', "invalid"),
         ('<tool_call>{"name":"adminCommand","arguments":{}}</tool_call>', "invalid"),
         ('<tool_call>{"name":"walkTo","arguments":{"x":"bad","z":2}}</tool_call>', "invalid"),
-        ('<tool_call>{"name":"chopTree","arguments":[]}</tool_call>', "invalid"),
-        ('<tool_call>{"name":"chopTree","arguments":{"unexpected":1}}</tool_call>', "invalid"),
-        ('<tool_call>{"name":"chopTree","arguments":{"tree_type":"Oak tree"}}</tool_call>', "invalid"),
-        ('<tool_call>{"name":"equipItem","arguments":{"item":"Bronze sword"}}</tool_call>', "invalid"),
+        ('<tool_call>{"name":"harvest","arguments":[]}</tool_call>', "invalid"),
+        (
+            '<tool_call>{"name":"harvest","arguments":{"id":1276,"x":3200,"z":3220,"unexpected":1}}</tool_call>',
+            "invalid",
+        ),
+        ('<tool_call>{"name":"harvest","arguments":{"x":3200,"z":3220}}</tool_call>', "invalid"),
+        ('<tool_call>{"name":"equipItem","arguments":{"slot":28}}</tool_call>', "invalid"),
         ('<tool_call>{"name":"walkTo","arguments":{"x":-1,"z":3220}}</tool_call>', "invalid"),
         ('<tool_call>{"name":"walkTo","arguments":{"x":16384,"z":3220}}</tool_call>', "invalid"),
         ("", "invalid"),
@@ -167,8 +174,13 @@ def test_parser_records_rejections(text: str, status: str) -> None:
 
 
 def test_multiple_calls_do_not_execute() -> None:
-    text = '<tool_call>{"name":"chopTree","arguments":{}}</tool_call>'
+    text = '<tool_call>{"name":"harvest","arguments":{"id":1276,"x":3200,"z":3220}}</tool_call>'
     assert parse_action(turn(text * 2), TaskSpec()).status == "invalid"
+
+
+def test_context_and_output_limits_are_distinct() -> None:
+    assert parse_action(turn("", "context_limit"), TaskSpec()).reason == "context_limit"
+    assert parse_action(turn("", "max_tokens"), TaskSpec()).reason == "generation_limit"
 
 
 class FakeClient:
@@ -184,7 +196,7 @@ class FakeClient:
             raise InfrastructureError("reset_failed")
         return self.state
 
-    def act(self, name: str, arguments: dict, timeout: float) -> ActionOutcome:
+    def act(self, name: str, arguments: dict, timeout: float, max_ticks: int = 35) -> ActionOutcome:
         self.index += 1
         action = harvest(self.state, request_id=str(self.index))
         self.state = action.after
@@ -205,6 +217,19 @@ def test_infrastructure_errors_have_no_reward(initial: Observation) -> None:
     client = FakeClient(initial, broken=True)
     result = rollout(client, TaskSpec(), ScriptedPolicy(), 42)
     assert result.status == "infra_invalid" and result.reward is None and client.closed
+
+
+def test_rejected_action_evidence_is_retained(initial: Observation) -> None:
+    class InvalidEvidenceClient(FakeClient):
+        def act(self, name: str, arguments: dict, timeout: float, max_ticks: int = 35) -> ActionOutcome:
+            action = super().act(name, arguments, timeout, max_ticks)
+            return action.model_copy(update={"after": action.after.model_copy(update={"episode_id": "foreign"})})
+
+    result = rollout(InvalidEvidenceClient(initial), TaskSpec(), ScriptedPolicy(), 42)
+    assert result.status == "infra_invalid" and result.reward is None
+    assert result.reason == "foreign_episode_evidence"
+    assert len(result.transitions) == 1
+    assert result.transitions[0].outcome.after.episode_id == "foreign"
 
 
 def episodes(initial: Observation) -> list[EpisodeResult]:
@@ -305,7 +330,8 @@ def test_checkpoint_commit_waits_for_sampler_refresh(
             if self.updates:
                 raise InfrastructureError("sampler_export_failed")
             policy = ScriptedPolicy()
-            policy.renderer = "scripted-v1"
+            policy.renderer = "scripted-v2"
+            policy.max_context = 65536
             return policy
 
         def save_state(self, name: str) -> str:
@@ -330,7 +356,7 @@ def test_reward_and_receipt_corruption_rejected(initial: Observation) -> None:
         build_examples([group[0].model_copy(update={"reward": 1.0}), group[1]], 2)
     receipt = verify_reset(TaskSpec(), initial).model_copy(update={"state_hash": "forged"})
     with pytest.raises(InfrastructureError, match="invalid_reset_receipt"):
-        verify_harvest(TaskSpec(), receipt, [])
+        verify_task(TaskSpec(), receipt, [])
 
 
 def test_bridge_rejects_wrong_action_name(initial: Observation, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -351,7 +377,7 @@ def test_unattributed_bank_mutation_invalidates_episode(initial: Observation) ->
         update={"after": action.after.model_copy(update={"bank": (Item(slot=0, id=1511, count=100),)})}
     )
     with pytest.raises(InfrastructureError, match="unattributed_progress"):
-        verify_harvest(TaskSpec(), verify_reset(TaskSpec(), initial), [action])
+        verify_task(TaskSpec(), verify_reset(TaskSpec(), initial), [action])
 
 
 @pytest.mark.parametrize("group_size", [2, 4])

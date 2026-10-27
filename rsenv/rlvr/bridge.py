@@ -54,7 +54,7 @@ class VerifiedBridgeClient:
             if not isinstance(response, dict) or any(
                 response.get(k) != v
                 for k, v in {
-                    "version": 1,
+                    "version": 2,
                     "episode_id": self.episode_id,
                     "world_id": self.lease.world_id,
                     "request_id": request_id,
@@ -113,7 +113,7 @@ class VerifiedBridgeClient:
             self.request_number += 1
             request_id = str(self.request_number)
             command = {
-                "version": 1,
+                "version": 2,
                 "episode_id": self.episode_id,
                 "world_id": self.lease.world_id,
                 "request_id": request_id,
@@ -147,10 +147,10 @@ class VerifiedBridgeClient:
         self.observation = current
         return current
 
-    def act(self, name: str, arguments: dict[str, Any], timeout: float) -> ActionOutcome:
+    def act(self, name: str, arguments: dict[str, Any], timeout: float, max_ticks: int = 35) -> ActionOutcome:
         if name not in self.task.allowed_tools:
             raise ValueError("Tool not enabled")
-        raw = self.rpc("action", timeout, name=name, arguments=arguments)
+        raw = self.rpc("action", timeout, name=name, arguments=arguments, max_ticks=max_ticks)
         result = ActionOutcome.model_validate({**raw, "request_id": str(self.request_number)})
         if result.name != name:
             self.poisoned = True

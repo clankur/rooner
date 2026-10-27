@@ -1,0 +1,8 @@
+{
+  "items": {"1511": "Logs", "436": "Copper ore", "438": "Tin ore", "1351": "Bronze axe", "1265": "Bronze pickaxe", "1277": "Bronze sword", "2309": "Bread"},
+  "harvests": [
+    {"name": "Tree", "loc_ids": [1276, 1277, 1278, 1279, 1280], "item_id": 1511, "skill_index": 8, "xp_tenths": 250, "incidental_item_ids": []},
+    {"name": "Copper rocks", "loc_ids": [2090, 2091], "item_id": 436, "skill_index": 14, "xp_tenths": 175, "incidental_item_ids": [1617, 1619, 1621, 1623]},
+    {"name": "Tin rocks", "loc_ids": [2094, 2095], "item_id": 438, "skill_index": 14, "xp_tenths": 175, "incidental_item_ids": [1617, 1619, 1621, 1623]}
+  ]
+}

@@ -4,8 +4,21 @@ import World from '#/engine/World.js';
 import Player from '#/engine/entity/Player.js';
 import InvType from '#/cache/config/InvType.js';
 import ObjType from '#/cache/config/ObjType.js';
-import LocType from '#/cache/config/LocType.js';
+import NpcType from '#/cache/config/NpcType.js';
+import Npc from '#/engine/entity/Npc.js';
 import VarPlayerType from '#/cache/config/VarPlayerType.js';
+
+interface Content {
+    items: Record<string, string>;
+    harvests: {
+        name: string;
+        loc_ids: number[];
+        item_id: number;
+        skill_index: number;
+        xp_tenths: number;
+    }[];
+}
+const content: Content = JSON.parse(fs.readFileSync(new URL('./rlvr_content.json', import.meta.url), 'utf8'));
 
 export interface Item {
     slot: number;
@@ -18,6 +31,9 @@ export interface Resource {
     x: number;
     z: number;
     name: string;
+    kind: "location" | "npc";
+    index?: number;
+    hp?: number;
 }
 
 interface ResetFixture {
@@ -26,6 +42,7 @@ interface ResetFixture {
     levels: number[];
     inventory: Item[];
     tutorial: number;
+    hp: number;
 }
 
 export interface Observation {
@@ -44,6 +61,11 @@ export interface Observation {
     tutorial: number;
     resources: Resource[];
     in_game: boolean;
+    paused: boolean;
+    npcs: Resource[];
+    combat_active: boolean;
+    combat_style: number;
+    item_names: Record<string, string>;
     runtime: {
         engine_rss_bytes: number;
         engine_cpu_seconds: number;
@@ -56,11 +78,13 @@ const username = process.env.RLVR_USERNAME!;
 const token = process.env.RLVR_CONTROL_TOKEN!;
 let sequence = 0;
 let bootstrapped = false;
+const clock = globalThis as typeof globalThis & { rlvrPaused?: boolean; rlvrPauseAt?: number };
+const harvests = new Map(content.harvests.flatMap(row => row.loc_ids.map(id => [id, row] as const)));
 
 export function initializePlayer(player: Player): void {
     if (player.username !== username) throw new Error('RLVR worlds admit only their leased account');
-    if (ObjType.getId('logs') !== 1511 || ObjType.getId('bronze_axe') !== 1351) {
-        throw new Error('Pinned resource IDs do not match the engine');
+    for (const [id, name] of Object.entries(content.items)) {
+        if (ObjType.get(Number(id)).name !== name) throw new Error(`Pinned item mismatch: ${id}`);
     }
     player.x = fixture.position[0];
     player.z = fixture.position[1];
@@ -76,6 +100,7 @@ export function initializePlayer(player: Player): void {
     }
     const inv = player.getInventory(InvType.INV)!;
     for (const item of fixture.inventory) inv.set(item.slot, { id: item.id, count: item.count });
+    player.levels[3] = fixture.hp;
     player.runenergy = 10000;
 }
 
@@ -106,12 +131,22 @@ function snapshot(): Observation {
             zones.add(key);
             for (const loc of World.gameMap.getZone(x, z, p.level).getAllLocsSafe()) {
                 if (Math.max(Math.abs(loc.x - p.x), Math.abs(loc.z - p.z)) > 16) continue;
-                const type = LocType.get(loc.type);
-                if (type.name === 'Tree') resources.push({ id: loc.type, x: loc.x, z: loc.z, name: type.name });
+                const rule = harvests.get(loc.type);
+                if (rule) resources.push({ id: loc.type, x: loc.x, z: loc.z, name: rule.name, kind: 'location' });
             }
         }
     }
     resources.sort((a, b) => a.x - b.x || a.z - b.z || a.id - b.id);
+    const npcs: Resource[] = [];
+    let combat = p.target instanceof Npc;
+    for (const npc of World.npcs) {
+        if (npc.target === p) combat = true;
+        if (npc.level !== p.level || Math.max(Math.abs(npc.x - p.x), Math.abs(npc.z - p.z)) > 16 || npc.levels[3] <= 0) continue;
+        const type = NpcType.get(npc.type);
+        if (!type.op?.some(op => op?.toLowerCase() === 'attack')) continue;
+        npcs.push({ id: npc.type, index: npc.nid, x: npc.x, z: npc.z, name: type.name ?? '', kind: 'npc', hp: npc.levels[3] });
+    }
+    npcs.sort((a, b) => a.index! - b.index!);
     return {
         episode_id: process.env.RLVR_EPISODE_ID!,
         world_id: process.env.RLVR_WORLD_ID!,
@@ -119,7 +154,7 @@ function snapshot(): Observation {
         tick: World.currentTick,
         position: [p.x, p.z, p.level],
         xp_tenths: Array.from(p.stats),
-        levels: Array.from(p.levels),
+        levels: Array.from(p.baseLevels),
         inventory: items('inv'),
         equipment: items('worn'),
         bank: items('bank'),
@@ -128,6 +163,11 @@ function snapshot(): Observation {
         tutorial: p.getVar(VarPlayerType.getId('tutorial')) as number,
         resources,
         in_game: p.slot >= 0,
+        paused: clock.rlvrPaused === true,
+        npcs,
+        combat_active: combat,
+        combat_style: p.getVar(VarPlayerType.getId('com_mode')) as number,
+        item_names: Object.fromEntries([...items('inv'), ...items('worn')].map(i => [String(i.id), ObjType.get(i.id).name ?? ''])),
         runtime: {
             engine_rss_bytes: process.memoryUsage().rss,
             engine_cpu_seconds: (process.cpuUsage().user + process.cpuUsage().system) / 1e6,
@@ -157,12 +197,23 @@ export function startControl(): void {
                     // Login timers remain real engine timers, reset to a common episode origin.
                     for (const timer of p.timers.values()) timer.clock = World.currentTick;
                     initializePlayer(p);
+                    p.setVar(VarPlayerType.getId('com_mode'), 0);
                     bootstrapped = true;
+                    clock.rlvrPaused = true;
                     return Response.json(snapshot());
                 }
                 if (!bootstrapped) throw new Error('Episode not bootstrapped');
                 if (req.method === 'POST' && path === '/cancel') {
                     cancel(player());
+                    return Response.json(snapshot());
+                }
+                if (req.method === 'POST' && (path === '/pause' || path === '/resume')) {
+                    if (path === '/resume') {
+                        const ticks = Number(new URL(req.url).searchParams.get('ticks'));
+                        if (!Number.isInteger(ticks) || ticks < 1 || ticks > 35) throw new Error('Invalid tick window');
+                        clock.rlvrPauseAt = World.currentTick + ticks;
+                    }
+                    clock.rlvrPaused = path === '/pause';
                     return Response.json(snapshot());
                 }
                 if (req.method === 'GET' && path === '/state') return Response.json(snapshot());
